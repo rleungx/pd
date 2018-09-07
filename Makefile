@@ -35,9 +35,9 @@ ifeq ("$(WITH_RACE)", "1")
 else
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
-	CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
 
 test: retool-setup
 	# testing..
@@ -100,7 +100,7 @@ endif
 	bash ./hack/clean_vendor.sh
 
 simulator:
-	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
+	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
 
 gofail-enable:
 	# Converting gofail failpoints...
