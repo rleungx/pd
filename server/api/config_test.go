@@ -90,14 +90,16 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	sc := &config.ScheduleConfig{}
 	c.Assert(readJSON(addr, sc), IsNil)
 
-	sc.MaxStoreDownTime.Duration = time.Second
-	postData, err := json.Marshal(sc)
+	l := map[string]interface{}{"max-store-down-time": "1s"}
+	postData, err := json.Marshal(l)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(3 * time.Second)
 	sc1 := &config.ScheduleConfig{}
 	c.Assert(readJSON(addr, sc1), IsNil)
+	sc.MaxStoreDownTime.Duration = time.Second
 	c.Assert(*sc, DeepEquals, *sc1)
 }
 
@@ -122,6 +124,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(3 * time.Second)
 	rc3 := &config.ReplicationConfig{}
 	err = readJSON(addr, rc3)
 	c.Assert(err, IsNil)

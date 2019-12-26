@@ -501,7 +501,7 @@ func update(config map[string]interface{}, configName []string, value string) er
 	case reflect.String:
 		v = value
 	case reflect.Slice:
-		// TODO: make slice work for any other type
+		// FIXME: make slice work for any other type, e.g., scheduler
 		v = strings.Split(value, ",")
 	default:
 		return errors.Errorf("unsupported type")

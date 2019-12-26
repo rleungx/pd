@@ -146,7 +146,7 @@ const (
 
 type lazyHandler struct {
 	options []func()
-	engine *negroni.Negroni
+	engine  *negroni.Negroni
 }
 
 func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +196,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilde
 	engine.UseHandler(router)
 
 	return &lazyHandler{
-		engine: engine,
+		engine:  engine,
 		options: options,
 	}, nil
 }
@@ -1042,13 +1042,11 @@ func (s *Server) configChangeLoop(interval time.Duration) {
 		config := new(bytes.Buffer)
 		if err := toml.NewEncoder(config).Encode(*s.GetConfig()); err != nil {
 			log.Error("failed to encode config", zap.Error(err))
-			cancel()
 			return
 		}
 		retry, err = s.createComponentConfig(ctx, version, name, config.String())
 		if err != nil {
 			log.Error("failed to create config", zap.Error(err))
-			cancel()
 			return
 		}
 	}
@@ -1064,8 +1062,12 @@ func (s *Server) configChangeLoop(interval time.Duration) {
 			if err != nil {
 				log.Error("failed to get config", zap.Error(err))
 			}
-			if config != "" {
-				s.updateComponentConfig(config)
+			if config == "" {
+				continue
+			}
+			err = s.updateComponentConfig(config)
+			if err != nil {
+				log.Error("failed to update config", zap.Error(err))
 			}
 		}
 	}
@@ -1114,18 +1116,19 @@ func (s *Server) updateComponentConfig(cfg string) error {
 	if _, err := toml.Decode(cfg, &new); err != nil {
 		return err
 	}
+	var err error
 	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
-		s.SetScheduleConfig(new.Schedule)
+		err = s.SetScheduleConfig(new.Schedule)
 	}
 
 	if !reflect.DeepEqual(old.Replication, new.Replication) {
-		s.SetReplicationConfig(new.Replication)
+		err = s.SetReplicationConfig(new.Replication)
 	}
 
 	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
-		s.SetPDServerConfig(new.PDServerCfg)
+		err = s.SetPDServerConfig(new.PDServerCfg)
 	}
-	return nil
+	return err
 }
 
 func (s *Server) reloadConfigFromKV() error {

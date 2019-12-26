@@ -75,11 +75,6 @@ type entry struct {
 // is through the context, so store it here
 func (m *configMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rc := m.s.GetRaftCluster()
-		if rc == nil {
-			m.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
-			return
-		}
 		req := make(map[string]interface{})
 		json.NewDecoder(r.Body).Decode(&req)
 		mapKeys := reflect.ValueOf(req).MapKeys()
