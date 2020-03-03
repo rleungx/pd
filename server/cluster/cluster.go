@@ -246,8 +246,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
 	}
-	stores := c.core.UpdateMaxScore()
-	c.core.PutStores(stores)
+
+	c.core.UpdateStoresMaxScore(c.opt.GetFlexibleScore())
 
 	log.Info("load stores",
 		zap.Int("count", c.GetStoreCount()),
@@ -393,7 +393,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return core.NewStoreNotFoundErr(storeID)
 	}
+
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.core.UpdateStoresMaxScore(c.opt.GetFlexibleScore(), newStore)
 	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
 			zap.Uint64("store-id", newStore.GetID()),
@@ -407,8 +409,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
-	stores := c.core.UpdateMaxScore(newStore)
-	c.core.PutStores(stores)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 
@@ -805,6 +805,13 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	return err
 }
 
+// UpdateStoresMaxScore updates stores' max score.
+func (c *RaftCluster) UpdateStoresMaxScore(flexibleScore uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.core.UpdateStoresMaxScore(flexibleScore)
+}
+
 // PutStore puts a store.
 // If 'force' is true, then overwrite the store's labels.
 func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
@@ -1028,8 +1035,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	stores := c.core.UpdateMaxScore(store)
-	c.core.PutStores(stores)
+	c.core.PutStore(store)
 	c.storesStats.CreateRollingStoreStats(store.GetID())
 	return nil
 }
@@ -1339,6 +1345,11 @@ func (c *RaftCluster) GetHighSpaceRatio() float64 {
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (c *RaftCluster) GetSchedulerMaxWaitingOperator() uint64 {
 	return c.opt.GetSchedulerMaxWaitingOperator()
+}
+
+// GetFlexibleScore returns flexible score to calculate the max score of stores.
+func (c *RaftCluster) GetFlexibleScore() uint64 {
+	return c.opt.GetFlexibleScore()
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
