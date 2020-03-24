@@ -917,7 +917,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
 		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
-		op, err = operator.CreateMovePeerOperator(
+		op, err = operator.CreateMovePeerOperator1(
 			"move-hot-"+bs.rwTy.String()+"-region",
 			bs.cluster,
 			bs.cur.region,

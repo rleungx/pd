@@ -66,6 +66,40 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 		Build(kind)
 }
 
+// CreateMovePeerOperator1 creates an operator that replaces an old peer with a new peer.
+func CreateMovePeerOperator1(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	peers := region.GetPeers()
+	var storeIDs []uint64
+
+	for _, p := range peers {
+		if p.GetIsLearner() {
+			continue
+		}
+		id := p.GetStoreId()
+		store := cluster.GetStore(id)
+		if store == nil {
+			continue
+		}
+		if id != oldStore {
+			storeIDs = append(storeIDs, id)
+		}
+	}
+	step := RandomLeader{
+		FromStore: oldStore,
+		ToStore:   storeIDs,
+	}
+	op, _ := NewBuilder(desc, cluster, region).
+		RemovePeer(oldStore).
+		AddPeer(peer).
+		Build(kind)
+	for i := 0; i < op.Len(); i++ {
+		if _, ok := op.Step(i).(TransferLeader); ok {
+			op.ReplaceStep(i, step)
+		}
+	}
+	return op, nil
+}
+
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
 func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).

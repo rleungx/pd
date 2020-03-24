@@ -229,6 +229,11 @@ func (o *Operator) Step(i int) OpStep {
 	return nil
 }
 
+// ReplaceStep ...
+func (o *Operator) ReplaceStep(i int, s OpStep) {
+	o.steps[i] = s
+}
+
 // Check checks if current step is finished, returns next step to take action.
 // If operator is at an end status, check returns nil.
 // It's safe to be called by multiple goroutine concurrently.

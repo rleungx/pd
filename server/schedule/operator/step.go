@@ -72,6 +72,35 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	to.LeaderCount++
 }
 
+// RandomLeader ...
+type RandomLeader struct {
+	FromStore uint64
+	ToStore   []uint64
+}
+
+// ConfVerChanged returns true if the conf version has been changed by this step
+func (tl RandomLeader) ConfVerChanged(region *core.RegionInfo) bool {
+	return false // transfer leader never change the conf version
+}
+
+func (tl RandomLeader) String() string {
+	return fmt.Sprintf("transfer random leader from store %v to store %v", tl.FromStore, tl.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (tl RandomLeader) IsFinish(region *core.RegionInfo) bool {
+	for _, id := range tl.ToStore {
+		if region.GetLeader().GetStoreId() == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step makes.
+func (tl RandomLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+}
+
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64
