@@ -51,6 +51,13 @@ func CreateTransferLeaderOperator(desc string, cluster Cluster, region *core.Reg
 		Build(kind)
 }
 
+// CreateRandomLeaderOperator creates an operator that transfers the leader from a source store to a random target store.
+func CreateRandomLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreIDs []uint64, kind OpKind) *Operator {
+	step := TransferLeader{FromStore: sourceStoreID, ToStore: targetStoreIDs}
+	brief := fmt.Sprintf("transfer random leader: store %d to %v", sourceStoreID, targetStoreIDs)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpLeader, step)
+}
+
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).

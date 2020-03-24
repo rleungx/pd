@@ -18,6 +18,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -592,9 +593,14 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.String("source", source))
 	switch st := step.(type) {
 	case operator.TransferLeader:
+		var idx int
+		l := len(st.ToStore)
+		if l != 0 {
+			idx = rand.Intn(l)
+		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
-				Peer: region.GetStorePeer(st.ToStore),
+				Peer: region.GetStorePeer(st.ToStore[idx]),
 			},
 		}
 		oc.hbStreams.SendMsg(region, cmd)

@@ -306,7 +306,7 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 }
 
 func (b *Builder) execTransferLeader(id uint64) {
-	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeader, ToStore: id})
+	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeader, ToStore: []uint64{id}})
 	b.currentLeader = id
 }
 

@@ -297,7 +297,8 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 // OpHistory is used to log and visualize completed operators.
 type OpHistory struct {
 	FinishTime time.Time
-	From, To   uint64
+	From       uint64
+	To         uint64
 	Kind       core.ResourceKind
 }
 
@@ -312,7 +313,7 @@ func (o *Operator) History() []OpHistory {
 			histories = append(histories, OpHistory{
 				FinishTime: now,
 				From:       s.FromStore,
-				To:         s.ToStore,
+				To:         s.ToStore[0],
 				Kind:       core.LeaderKind,
 			})
 		case AddPeer:

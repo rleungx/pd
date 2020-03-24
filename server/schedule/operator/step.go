@@ -44,7 +44,9 @@ type OpStep interface {
 
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
-	FromStore, ToStore uint64
+	FromStore uint64
+	ToStore   []uint64
+	callback  func(id uint64)
 }
 
 // ConfVerChanged returns true if the conf version has been changed by this step
@@ -58,18 +60,37 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
-	return region.GetLeader().GetStoreId() == tl.ToStore
+	for i, id := range tl.ToStore {
+		if region.GetLeader().GetStoreId() == id {
+			newToStore := append(tl.ToStore[:i], tl.ToStore[i+1:]...)
+			tl.ToStore = append([]uint64{id}, newToStore...)
+			tl.callback(id)
+			return true
+		}
+	}
+	return false
 }
 
 // Influence calculates the store difference that current step makes.
 func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
-	to := opInfluence.GetStoreInfluence(tl.ToStore)
-
 	from.LeaderSize -= region.GetApproximateSize()
 	from.LeaderCount--
-	to.LeaderSize += region.GetApproximateSize()
-	to.LeaderCount++
+
+	for _, storeID := range tl.ToStore {
+		to := opInfluence.GetStoreInfluence(storeID)
+		to.LeaderSize += region.GetApproximateSize()
+		to.LeaderCount++
+	}
+	tl.callback = func(id uint64) {
+		for _, storeID := range tl.ToStore {
+			if storeID != id {
+				to := opInfluence.GetStoreInfluence(storeID)
+				to.LeaderSize -= region.GetApproximateSize()
+				to.LeaderCount--
+			}
+		}
+	}
 }
 
 // AddPeer is an OpStep that adds a region peer.
