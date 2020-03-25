@@ -270,7 +270,7 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 }
 
 // RegionScore returns the store's region score.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+func (s *StoreInfo) RegionScore(lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
 	available := float64(s.GetAvailable()) / (1 << 20)
@@ -284,33 +284,12 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		amplification = float64(s.GetRegionSize()) / used
 	}
 
-	// highSpaceBound is the lower bound of the high space stage.
-	highSpaceBound := (1 - highSpaceRatio) * capacity
 	// lowSpaceBound is the upper bound of the low space stage.
 	lowSpaceBound := (1 - lowSpaceRatio) * capacity
-	if available-float64(delta)/amplification >= highSpaceBound {
+	if available-float64(delta)/amplification >= lowSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
-	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = s.maxScore - (available - float64(delta)/amplification)
 	} else {
-		// to make the score function continuous, we use linear function y = k * x + b as transition period
-		// from above we know that there are two points must on the function image
-		// note that it is possible that other irrelative files occupy a lot of storage, so capacity == available + used + irrelative
-		// and we regarded irrelative as a fixed value.
-		// Then amp = size / used = size / (capacity - irrelative - available)
-		//
-		// When available == highSpaceBound,
-		// we can conclude that size = (capacity - irrelative - highSpaceBound) * amp = (used + available - highSpaceBound) * amp
-		// Similarly, when available == lowSpaceBound,
-		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
-		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
-		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, s.maxScore-lowSpaceBound
-
-		k := (y2 - y1) / (x2 - x1)
-		b := y1 - k*x1
-
-		score = k*float64(s.GetRegionSize()+delta) + b
+		score = s.maxScore - (available - float64(delta)/amplification)
 	}
 
 	return score / math.Max(s.GetRegionWeight(), minWeight)
@@ -364,7 +343,7 @@ func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, low
 	case LeaderKind:
 		return s.LeaderScore(scheduleKind.Policy, delta)
 	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
+		return s.RegionScore(lowSpaceRatio, delta)
 	default:
 		return 0
 	}
