@@ -47,8 +47,8 @@ func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+			result.ResourceScore(s.kind, opt.GetLowSpaceRatio(), 0) <
+				store.ResourceScore(s.kind, opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}
@@ -66,8 +66,8 @@ func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+			result.ResourceScore(s.kind, opt.GetLowSpaceRatio(), 0) >
+				store.ResourceScore(s.kind, opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}

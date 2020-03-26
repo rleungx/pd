@@ -69,8 +69,8 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	tolerantResource := getTolerantResource(cluster, region, kind)
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
-	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	sourceScore := source.ResourceScore(kind, cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore := target.ResourceScore(kind, cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
 	if cluster.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
