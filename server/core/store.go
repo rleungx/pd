@@ -46,6 +46,7 @@ type StoreInfo struct {
 	regionWeight     float64
 	maxScore         float64
 	available        func() bool
+	amplifications   []float64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -283,6 +284,8 @@ func (s *StoreInfo) RegionScore(lowSpaceRatio float64, delta int64) float64 {
 		// because of rocksdb compression, region size is larger than actual used size
 		amplification = float64(s.GetRegionSize()) / used
 	}
+	s.putAmplification(amplification)
+	amplification = s.getAmplification()
 
 	// lowSpaceBound is the upper bound of the low space stage.
 	lowSpaceBound := (1 - lowSpaceRatio) * capacity
@@ -293,6 +296,22 @@ func (s *StoreInfo) RegionScore(lowSpaceRatio float64, delta int64) float64 {
 	}
 
 	return score / math.Max(s.GetRegionWeight(), minWeight)
+}
+
+func (s *StoreInfo) putAmplification(amplification float64) {
+	if len(s.amplifications) > 10 {
+		s.amplifications = append(s.amplifications[1:], amplification)
+	} else {
+		s.amplifications = append(s.amplifications, amplification)
+	}
+}
+
+func (s *StoreInfo) getAmplification() float64 {
+	total := 0.0
+	for i := 0; i < len(s.amplifications); i++ {
+		total += s.amplifications[i]
+	}
+	return total / float64(len(s.amplifications))
 }
 
 // StorageSize returns store's used storage size reported from tikv.
