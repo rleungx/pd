@@ -33,7 +33,7 @@ const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
 	adjustRatio             float64 = 0.005
 	leaderTolerantSizeRatio float64 = 5.0
-	minTolerantSizeRatio    float64 = 1.0
+	minTolerantSizeRatio    float64 = 2.0
 )
 
 // ErrScheduleConfigNotExist the config is not correct.
@@ -67,10 +67,13 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	sourceID := source.GetID()
 	targetID := target.GetID()
 	tolerantResource := getTolerantResource(cluster, region, kind)
+	if float64(source.GetAvailable()/source.GetCapacity()) > cluster.GetHighSpaceRatio() {
+		tolerantResource = tolerantResource * 1.5
+	}
 	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
-	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
-	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), float64(sourceInfluence)-tolerantResource)
+	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), float64(targetInfluence)+tolerantResource)
 	if cluster.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
@@ -87,18 +90,18 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", targetScore),
 			zap.Int64("target-influence", targetInfluence),
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
-			zap.Int64("tolerant-resource", tolerantResource))
+			zap.Float64("tolerant-resource", tolerantResource))
 	}
 	return shouldBalance
 }
 
-func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
+func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) float64 {
 	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
-		leaderCount := int64(1.0 * tolerantSizeRatio)
+		leaderCount := 1.0 * tolerantSizeRatio
 		return leaderCount
 	}
 
@@ -106,8 +109,7 @@ func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
-	return regionSize
+	return float64(regionSize) * adjustTolerantRatio(cluster)
 }
 
 func adjustTolerantRatio(cluster opt.Cluster) float64 {

@@ -36,7 +36,7 @@ const (
 	defaultStoreBalanceRate            = 60
 	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
-	defaultHighSpaceRatio              = 0.6
+	defaultHighSpaceRatio              = 0.7
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true

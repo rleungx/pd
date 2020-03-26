@@ -142,14 +142,14 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	sort.Slice(sources, func(i, j int) bool {
 		iOp := opInfluence.GetStoreInfluence(sources[i].GetID()).ResourceProperty(kind)
 		jOp := opInfluence.GetStoreInfluence(sources[j].GetID()).ResourceProperty(kind)
-		return sources[i].LeaderScore(leaderSchedulePolicy, iOp) >
-			sources[j].LeaderScore(leaderSchedulePolicy, jOp)
+		return sources[i].LeaderScore(leaderSchedulePolicy, float64(iOp)) >
+			sources[j].LeaderScore(leaderSchedulePolicy, float64(jOp))
 	})
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := opInfluence.GetStoreInfluence(targets[i].GetID()).ResourceProperty(kind)
 		jOp := opInfluence.GetStoreInfluence(targets[j].GetID()).ResourceProperty(kind)
-		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) <
-			targets[j].LeaderScore(leaderSchedulePolicy, jOp)
+		return targets[i].LeaderScore(leaderSchedulePolicy, float64(iOp)) <
+			targets[j].LeaderScore(leaderSchedulePolicy, float64(jOp))
 	})
 
 	for i := 0; i < len(sources) || i < len(targets); i++ {

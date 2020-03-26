@@ -29,6 +29,7 @@ import (
 
 // Interval to save store meta (including heartbeat ts) to etcd.
 const storePersistInterval = 5 * time.Minute
+const lowSpaceThreshold = 100 * (1 << 30) // 100 GB
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
@@ -257,19 +258,19 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
-func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
+func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta float64) float64 {
 	switch policy {
 	case BySize:
-		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+		return (float64(s.GetLeaderSize()) + delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	case ByCount:
-		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+		return (float64(int64(s.GetLeaderCount())) + delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	default:
 		return 0
 	}
 }
 
 // RegionScore returns the store's region score.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta float64) float64 {
 	var score float64
 	var amplification float64
 	available := float64(s.GetAvailable()) / (1 << 20)
@@ -286,9 +287,9 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	// highSpaceBound is the lower bound of the high space stage.
 	highSpaceBound := (1 - highSpaceRatio) * capacity
 	// lowSpaceBound is the upper bound of the low space stage.
-	lowSpaceBound := (1 - lowSpaceRatio) * capacity
+	lowSpaceBound := s.GetLowSpaceThreshold(lowSpaceRatio)
 	if available-float64(delta)/amplification >= highSpaceBound {
-		score = float64(s.GetRegionSize() + delta)
+		score = float64(s.GetRegionSize()) + delta
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
 		score = maxScore - (available - float64(delta)/amplification)
 	} else {
@@ -308,7 +309,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
-		score = k*float64(s.GetRegionSize()+delta) + b
+		score = k*(float64(s.GetRegionSize())+delta) + b
 	}
 
 	return score / math.Max(s.GetRegionWeight(), minWeight)
@@ -319,17 +320,19 @@ func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
 }
 
-// AvailableRatio is store's freeSpace/capacity.
-func (s *StoreInfo) AvailableRatio() float64 {
-	if s.GetCapacity() == 0 {
-		return 0
+// GetLowSpaceThreshold returns the threshold of low space.
+func (s *StoreInfo) GetLowSpaceThreshold(lowSpaceRatio float64) float64 {
+	min := float64(lowSpaceThreshold)
+	lowSpace := float64(s.GetCapacity()) * lowSpaceRatio
+	if min > lowSpace {
+		min = lowSpace
 	}
-	return float64(s.GetAvailable()) / float64(s.GetCapacity())
+	return min
 }
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	return s.GetStoreStats() != nil && s.AvailableRatio() < 1-lowSpaceRatio
+	return s.GetStoreStats() != nil && float64(s.GetAvailable()) < s.GetLowSpaceThreshold(lowSpaceRatio)
 }
 
 // ResourceCount returns count of leader/region in the store.
@@ -357,7 +360,7 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta float64) float64 {
 	switch scheduleKind.Resource {
 	case LeaderKind:
 		return s.LeaderScore(scheduleKind.Policy, delta)
