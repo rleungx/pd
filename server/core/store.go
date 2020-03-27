@@ -323,7 +323,7 @@ func (s *StoreInfo) StorageSize() uint64 {
 // GetLowSpaceThreshold returns the threshold of low space.
 func (s *StoreInfo) GetLowSpaceThreshold(lowSpaceRatio float64) float64 {
 	min := float64(lowSpaceThreshold)
-	lowSpace := float64(s.GetCapacity()) * lowSpaceRatio
+	lowSpace := float64(s.GetCapacity()) * (1 - lowSpaceRatio)
 	if min > lowSpace {
 		min = lowSpace
 	}
