@@ -29,7 +29,8 @@ import (
 
 // Interval to save store meta (including heartbeat ts) to etcd.
 const storePersistInterval = 5 * time.Minute
-const lowSpaceThreshold = 100 * (1 << 30) // 100 GB
+const lowSpaceThreshold = 100 * (1 << 10)  // 100 GB
+const highSpaceThreshold = 300 * (1 << 10) // 300 GB
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
@@ -275,7 +276,6 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta flo
 	var amplification float64
 	available := float64(s.GetAvailable()) / (1 << 20)
 	used := float64(s.GetUsedSize()) / (1 << 20)
-	capacity := float64(s.GetCapacity()) / (1 << 20)
 
 	if s.GetRegionSize() == 0 {
 		amplification = 1
@@ -285,7 +285,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta flo
 	}
 
 	// highSpaceBound is the lower bound of the high space stage.
-	highSpaceBound := (1 - highSpaceRatio) * capacity
+	highSpaceBound := s.GetHighSpaceThreshold(highSpaceRatio)
 	// lowSpaceBound is the upper bound of the low space stage.
 	lowSpaceBound := s.GetLowSpaceThreshold(lowSpaceRatio)
 	if available-float64(delta)/amplification >= highSpaceBound {
@@ -320,19 +320,32 @@ func (s *StoreInfo) StorageSize() uint64 {
 	return s.GetUsedSize()
 }
 
-// GetLowSpaceThreshold returns the threshold of low space.
+// GetLowSpaceThreshold returns the threshold of low space in MB.
 func (s *StoreInfo) GetLowSpaceThreshold(lowSpaceRatio float64) float64 {
-	min := float64(lowSpaceThreshold)
-	lowSpace := float64(s.GetCapacity()) * (1 - lowSpaceRatio)
+	var min float64 = lowSpaceThreshold
+	capacity := float64(s.GetCapacity()) / (1 << 20)
+	lowSpace := capacity * (1.0 - lowSpaceRatio)
 	if min > lowSpace {
 		min = lowSpace
 	}
 	return min
 }
 
+// GetHighSpaceThreshold returns the threshold of high space in MB.
+func (s *StoreInfo) GetHighSpaceThreshold(highSpaceRatio float64) float64 {
+	var min float64 = highSpaceThreshold
+	capacity := float64(s.GetCapacity()) / (1 << 20)
+	highSpace := capacity * (1.0 - highSpaceRatio)
+	if min > highSpace {
+		min = highSpace
+	}
+	return min
+}
+
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	return s.GetStoreStats() != nil && float64(s.GetAvailable()) < s.GetLowSpaceThreshold(lowSpaceRatio)
+	available := float64(s.GetAvailable()) / (1 << 20)
+	return s.GetStoreStats() != nil && available < s.GetLowSpaceThreshold(lowSpaceRatio)
 }
 
 // ResourceCount returns count of leader/region in the store.
