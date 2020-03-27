@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	mv "github.com/RobinUS2/golang-moving-average"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -45,6 +46,7 @@ type StoreInfo struct {
 	leaderWeight     float64
 	regionWeight     float64
 	available        func() bool
+	ma               *mv.MovingAverage
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -54,6 +56,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		stats:        &pdpb.StoreStats{},
 		leaderWeight: 1.0,
 		regionWeight: 1.0,
+		ma:           mv.New(10),
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -276,6 +279,8 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	used := float64(s.GetUsedSize()) / (1 << 20)
 	capacity := float64(s.GetCapacity()) / (1 << 20)
 
+	s.ma.Add(available)
+	availableAvg := s.ma.Avg()
 	if s.GetRegionSize() == 0 {
 		amplification = 1
 	} else {
@@ -290,7 +295,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = maxScore - (available - float64(delta)/amplification)
+		score = maxScore - (availableAvg - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -303,8 +308,8 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// Similarly, when available == lowSpaceBound,
 		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
 		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
-		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, maxScore-lowSpaceBound
+		x1, y1 := (used+availableAvg-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
+		x2, y2 := (used+availableAvg-lowSpaceBound)*amplification, maxScore-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
