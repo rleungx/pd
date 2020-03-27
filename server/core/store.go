@@ -56,7 +56,6 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		stats:        &pdpb.StoreStats{},
 		leaderWeight: 1.0,
 		regionWeight: 1.0,
-		ma:           mv.New(10),
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -279,6 +278,9 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	used := float64(s.GetUsedSize()) / (1 << 20)
 	capacity := float64(s.GetCapacity()) / (1 << 20)
 
+	if s.ma == nil {
+		s.ma = mv.New(10)
+	}
 	s.ma.Add(available)
 	availableAvg := s.ma.Avg()
 	if s.GetRegionSize() == 0 {
