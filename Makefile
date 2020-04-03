@@ -141,8 +141,8 @@ lint:
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 swagger-spec: install-tools
-	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+	# go mod vendor
+	# swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
 tidy:
 	@echo "go mod tidy"
