@@ -81,6 +81,56 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetConfig()
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
+
+	conf := make(map[string]string)
+	if err := json.Unmarshal(data, conf); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	for k, v := range conf {
+		if kp := strings.Split(k, "."); len(kp) == 2 {
+			delete(conf, k)
+			conf[kp[1]] = v
+			data, err = json.Marshal(conf)
+			if err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+			switch kp[0] {
+			case "schedule":
+				found, err := h.updateSchedule(data, config)
+				if err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			case "replication":
+				found, err := h.updateReplication(data, config)
+				if err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			case "pd-server":
+				found, err := h.updatePDServerConfig(data, config)
+				if err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			case "log":
+				found, err := h.updateLogConfig(data, config)
+				if err != nil {
+					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+			if !found {
+				h.rd.JSON(w, http.StatusBadRequest, "config item not found")
+				return
+			}
+			h.rd.JSON(w, http.StatusOK, nil)
+		}
+	}
+
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -136,6 +186,17 @@ func (h *confHandler) updatePDServerConfig(data []byte, config *config.Config) (
 	}
 	if updated {
 		err = h.svr.SetPDServerConfig(config.PDServerCfg)
+	}
+	return found, err
+}
+
+func (h *confHandler) updateLogConfig(data []byte, config *config.Config) (bool, error) {
+	updated, found, err := h.mergeConfig(&config.Log, data)
+	if err != nil {
+		return false, err
+	}
+	if updated {
+		err = h.svr.SetLogConfig(config.Log)
 	}
 	return found, err
 }
