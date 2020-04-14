@@ -95,29 +95,30 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 			data, err = json.Marshal(conf)
 			if err != nil {
 				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
 			}
-			return
+			var found bool
 			switch kp[0] {
 			case "schedule":
-				found, err := h.updateSchedule(data, config)
+				found, err = h.updateSchedule(data, config)
 				if err != nil {
 					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 					return
 				}
 			case "replication":
-				found, err := h.updateReplication(data, config)
+				found, err = h.updateReplication(data, config)
 				if err != nil {
 					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 					return
 				}
 			case "pd-server":
-				found, err := h.updatePDServerConfig(data, config)
+				found, err = h.updatePDServerConfig(data, config)
 				if err != nil {
 					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 					return
 				}
 			case "log":
-				found, err := h.updateLogConfig(data, config)
+				found, err = h.updateLogConfig(data, config)
 				if err != nil {
 					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 					return
