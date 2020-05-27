@@ -3,7 +3,7 @@ addAssignees: true
 numberOfReviewers: 0
 numberOfAssignees: 1
 useReviewGroups: false
-useAssigneeGroups: false
+useAssigneeGroups: true
 assigneeGroups:
   scheduling:
     - nolouch
