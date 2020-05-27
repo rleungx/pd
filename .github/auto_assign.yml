@@ -12,10 +12,10 @@ assigneeGroups:
     - shafreeck
     - HunDunDM
     - rleungx
-# filterLabels:
-#   # Run
-#   include:
-#     - enhancement
-#   # Not run
-#   exclude:
-#     - invalid
+filterLabels:
+  # Run
+  include:
+    - enhancement
+  # Not run
+  exclude:
+    - invalid
