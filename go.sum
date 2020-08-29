@@ -295,6 +295,8 @@ github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200828163048-558ecbdcd725 h
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200828163048-558ecbdcd725/go.mod h1:NKFTF5xGnKSxDqe/NxqbZ4VWVlLaGdwRng6C1mJdNAI=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829032645-65b148b0dfc4 h1:KiIMaSzeEpEyah+9KLMQ8q0EWNl8CHQEQHr0b8oM80w=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829032645-65b148b0dfc4/go.mod h1:NKFTF5xGnKSxDqe/NxqbZ4VWVlLaGdwRng6C1mJdNAI=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829162610-10bf65204480 h1:J0PVyplEGrEr0m0Yp9sgzTzsg0dF+8Vrv0EpMRxQxCw=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829162610-10bf65204480/go.mod h1:NKFTF5xGnKSxDqe/NxqbZ4VWVlLaGdwRng6C1mJdNAI=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4 h1:iRtOAQ6FXkY/BGvst3CDfTva4nTqh6CL8WXvanLdbu0=
