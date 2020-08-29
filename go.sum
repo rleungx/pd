@@ -293,6 +293,8 @@ github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5e
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200828163048-558ecbdcd725 h1:LwJOqlYEtUuKlSAXFR/jG1Gc0cBTHiZE9KFefv42TkI=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200828163048-558ecbdcd725/go.mod h1:NKFTF5xGnKSxDqe/NxqbZ4VWVlLaGdwRng6C1mJdNAI=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829032645-65b148b0dfc4 h1:KiIMaSzeEpEyah+9KLMQ8q0EWNl8CHQEQHr0b8oM80w=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200829032645-65b148b0dfc4/go.mod h1:NKFTF5xGnKSxDqe/NxqbZ4VWVlLaGdwRng6C1mJdNAI=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4 h1:iRtOAQ6FXkY/BGvst3CDfTva4nTqh6CL8WXvanLdbu0=
