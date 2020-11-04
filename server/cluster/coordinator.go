@@ -105,28 +105,11 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		// Check suspect regions first.
-		for _, id := range c.cluster.GetSuspectRegions() {
-			region := c.cluster.GetRegion(id)
-			if region == nil {
-				// the region could be recent split, continue to wait.
-				continue
-			}
-			if c.opController.GetOperator(id) != nil {
-				c.cluster.RemoveSuspectRegion(id)
-				continue
-			}
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
-			if checkerIsBusy {
-				continue
-			}
-			if len(ops) > 0 {
-				c.opController.AddWaitingOperator(ops...)
-			}
-			c.cluster.RemoveSuspectRegion(id)
-		}
-
+		c.checkSuspectRegions()
 		// Check suspect key ranges
 		c.checkSuspectKeyRanges()
+		// Check regions in the waiting list
+		c.checkWaitingRegions()
 
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
@@ -157,6 +140,28 @@ func (c *coordinator) patrolRegions() {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
+	}
+}
+
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.cluster.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			c.cluster.RemoveSuspectRegion(id)
+			continue
+		}
+		checkerIsBusy, ops := c.checkers.CheckRegion(region)
+		if checkerIsBusy {
+			continue
+		}
+		if len(ops) > 0 {
+			c.opController.AddWaitingOperator(ops...)
+		}
+		c.cluster.RemoveSuspectRegion(id)
 	}
 }
 
@@ -191,7 +196,31 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
-// drivePushOperator is used to push the unfinished operator to the excutor.
+func (c *coordinator) checkWaitingRegions() {
+	items := c.checkers.GetWaitingRegions()
+	for _, item := range items {
+		id := item.Key
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			c.checkers.RemoveWaitingRegion(id)
+			continue
+		}
+		checkerIsBusy, ops := c.checkers.CheckRegion(region)
+		if checkerIsBusy {
+			continue
+		}
+		if len(ops) > 0 {
+			c.opController.AddWaitingOperator(ops...)
+		}
+		c.checkers.RemoveWaitingRegion(id)
+	}
+}
+
+// drivePushOperator is used to push the unfinished operator to the executor.
 func (c *coordinator) drivePushOperator() {
 	defer logutil.LogPanic()
 
