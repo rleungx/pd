@@ -134,6 +134,14 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
+func (s *Storage) storeHotReadWeightPath(storeID uint64) string {
+	return path.Join(schedulePath, "store_hot_weight", fmt.Sprintf("%020d", storeID), "hotread")
+}
+
+func (s *Storage) storeHotWriteWeightPath(storeID uint64) string {
+	return path.Join(schedulePath, "store_hot_weight", fmt.Sprintf("%020d", storeID), "hotwrite")
+}
+
 // EncryptionKeysPath returns the path to save encryption keys.
 func (s *Storage) EncryptionKeysPath() string {
 	return path.Join(encryptionKeysPath, "keys")
@@ -386,7 +394,20 @@ func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
+
+			howReadWeight, err := s.loadFloatWithDefaultValue(s.storeHotReadWeightPath(store.GetId()), 1.0)
+			if err != nil {
+				return err
+			}
+			howWriteWeight, err := s.loadFloatWithDefaultValue(s.storeHotWriteWeightPath(store.GetId()), 1.0)
+			if err != nil {
+				return err
+			}
+
+			newStoreInfo := NewStoreInfo(store,
+				SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight),
+				SetHotReadWeight(howReadWeight), SetHotWriteWeight(howWriteWeight),
+			)
 
 			nextID = store.GetId() + 1
 			f(newStoreInfo)
@@ -405,6 +426,16 @@ func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error 
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
 	return s.Save(s.storeRegionWeightPath(storeID), regionValue)
+}
+
+// SaveStoreHotWeight saves a store's hot read/write weight to storage.
+func (s *Storage) SaveStoreHotWeight(storeID uint64, hotRead, hotWrite float64) error {
+	hotReadValue := strconv.FormatFloat(hotRead, 'f', -1, 64)
+	if err := s.Save(s.storeLeaderWeightPath(storeID), hotReadValue); err != nil {
+		return err
+	}
+	hotWriteValue := strconv.FormatFloat(hotWrite, 'f', -1, 64)
+	return s.Save(s.storeRegionWeightPath(storeID), hotWriteValue)
 }
 
 func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {

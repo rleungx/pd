@@ -342,6 +342,59 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 
 // FIXME: details of input json body params
 // @Tags store
+// @Summary Set the store's hot read/write weight.
+// @Param id path integer true "Store Id"
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The store's label is updated."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /store/{id}/hot-weight [post]
+func (h *storeHandler) SetHotWeight(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	hotReadVal, ok := input["hot_read"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "hot read weight unset")
+		return
+	}
+	hotWriteVal, ok := input["hot_write"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "hot write weight unset")
+		return
+	}
+	hotRead, ok := hotReadVal.(float64)
+	if !ok || hotRead < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "bad format leader weight")
+		return
+	}
+	hotWrite, ok := hotWriteVal.(float64)
+	if !ok || hotWrite < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "bad format region weight")
+		return
+	}
+
+	if err := rc.SetStoreHotWeight(storeID, hotRead, hotWrite); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+}
+
+// FIXME: details of input json body params
+// @Tags store
 // @Summary Set the store's limit.
 // @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
 // @Param id path integer true "Store Id"
