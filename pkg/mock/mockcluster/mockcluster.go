@@ -324,7 +324,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	num := mc.HotCache.GetFilledPeriod(statistics.ReadFlow)
 	for i := 0; i < num; i++ {
-		items := mc.HotCache.CheckRead(r)
+		items := mc.HotCache.CheckRead(r, map[uint64]float64{})
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}
@@ -344,7 +344,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	num := mc.HotCache.GetFilledPeriod(statistics.WriteFlow)
 	for i := 0; i < num; i++ {
-		items := mc.HotCache.CheckWrite(r)
+		items := mc.HotCache.CheckWrite(r, map[uint64]float64{})
 		for _, item := range items {
 			mc.HotCache.Update(item)
 		}

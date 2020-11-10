@@ -74,9 +74,9 @@ func (s *StoresStats) GetOrCreateRollingStoreStats(storeID uint64) *RollingStore
 }
 
 // Observe records the current store status with a given store.
-func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
+func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats, hotReadWeight, hotWriteWeight float64) {
 	store := s.GetOrCreateRollingStoreStats(storeID)
-	store.Observe(stats)
+	store.Observe(stats, hotReadWeight, hotWriteWeight)
 }
 
 // Set sets the store statistics (for test).
@@ -335,16 +335,16 @@ func collect(records []*pdpb.RecordPair) float64 {
 }
 
 // Observe records current statistics.
-func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
+func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats, hotReadWeight, hotWriteWeight float64) {
 	statInterval := stats.GetInterval()
 	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
 	log.Debug("update store stats", zap.Uint64("key-write", stats.KeysWritten), zap.Uint64("bytes-write", stats.BytesWritten), zap.Duration("interval", time.Duration(interval)*time.Second), zap.Uint64("store-id", stats.GetStoreId()))
 	r.Lock()
 	defer r.Unlock()
-	r.bytesWriteRate.Add(float64(stats.BytesWritten), time.Duration(interval)*time.Second)
-	r.bytesReadRate.Add(float64(stats.BytesRead), time.Duration(interval)*time.Second)
-	r.keysWriteRate.Add(float64(stats.KeysWritten), time.Duration(interval)*time.Second)
-	r.keysReadRate.Add(float64(stats.KeysRead), time.Duration(interval)*time.Second)
+	r.bytesWriteRate.Add(float64(stats.BytesWritten)/hotWriteWeight, time.Duration(interval)*time.Second)
+	r.bytesReadRate.Add(float64(stats.BytesRead)/hotReadWeight, time.Duration(interval)*time.Second)
+	r.keysWriteRate.Add(float64(stats.KeysWritten)/hotWriteWeight, time.Duration(interval)*time.Second)
+	r.keysReadRate.Add(float64(stats.KeysRead)/hotReadWeight, time.Duration(interval)*time.Second)
 
 	// Updates the cpu usages and disk rw rates of store.
 	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))

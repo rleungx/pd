@@ -523,7 +523,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		c.storesStats.UpdateStoreHeartbeatMetrics(store)
 	}
 	c.core.PutStore(newStore)
-	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
+	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats(), newStore.GetHotReadWeight(), newStore.GetHotWriteWeight())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
 	c.storesStats.FilterUnhealthyStore(c)
@@ -1464,12 +1464,20 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckWrite(region)
+	writeWeights := make(map[uint64]float64)
+	for _, store := range c.core.GetStores() {
+		writeWeights[store.GetID()] = store.GetHotWriteWeight()
+	}
+	return c.hotSpotCache.CheckWrite(region, writeWeights)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
-	return c.hotSpotCache.CheckRead(region)
+	readWeights := make(map[uint64]float64)
+	for _, store := range c.core.GetStores() {
+		readWeights[store.GetID()] = store.GetHotReadWeight()
+	}
+	return c.hotSpotCache.CheckRead(region, readWeights)
 }
 
 // TODO: remove me.

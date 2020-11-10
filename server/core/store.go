@@ -46,16 +46,20 @@ type StoreInfo struct {
 	lastPersistTime     time.Time
 	leaderWeight        float64
 	regionWeight        float64
+	hotReadWeight       float64
+	hotWriteWeight      float64
 	available           map[storelimit.Type]func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:         store,
-		stats:        &pdpb.StoreStats{},
-		leaderWeight: 1.0,
-		regionWeight: 1.0,
+		meta:           store,
+		stats:          &pdpb.StoreStats{},
+		leaderWeight:   1.0,
+		regionWeight:   1.0,
+		hotReadWeight:  1.0,
+		hotWriteWeight: 1.0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -78,6 +82,8 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		lastPersistTime:     s.lastPersistTime,
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
+		hotReadWeight:       s.hotReadWeight,
+		hotWriteWeight:      s.hotWriteWeight,
 		available:           s.available,
 	}
 
@@ -101,6 +107,8 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		lastPersistTime:     s.lastPersistTime,
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
+		hotReadWeight:       s.hotReadWeight,
+		hotWriteWeight:      s.hotWriteWeight,
 		available:           s.available,
 	}
 
@@ -195,23 +203,23 @@ func (s *StoreInfo) GetUsedSize() uint64 {
 }
 
 // GetBytesWritten returns the bytes written for the store during this period.
-func (s *StoreInfo) GetBytesWritten() uint64 {
-	return s.stats.GetBytesWritten()
+func (s *StoreInfo) GetBytesWritten() float64 {
+	return float64(s.stats.GetBytesWritten()) / s.GetHotWriteWeight()
 }
 
 // GetBytesRead returns the bytes read for the store during this period.
-func (s *StoreInfo) GetBytesRead() uint64 {
-	return s.stats.GetBytesRead()
+func (s *StoreInfo) GetBytesRead() float64 {
+	return float64(s.stats.GetBytesRead()) / s.GetHotReadWeight()
 }
 
 // GetKeysWritten returns the keys written for the store during this period.
-func (s *StoreInfo) GetKeysWritten() uint64 {
-	return s.stats.GetKeysWritten()
+func (s *StoreInfo) GetKeysWritten() float64 {
+	return float64(s.stats.GetKeysWritten()) / s.GetHotWriteWeight()
 }
 
 // GetKeysRead returns the keys read for the store during this period.
-func (s *StoreInfo) GetKeysRead() uint64 {
-	return s.stats.GetKeysRead()
+func (s *StoreInfo) GetKeysRead() float64 {
+	return float64(s.stats.GetKeysRead()) / s.GetHotReadWeight()
 }
 
 // IsBusy returns if the store is busy.
@@ -267,6 +275,16 @@ func (s *StoreInfo) GetLeaderWeight() float64 {
 // GetRegionWeight returns the Region weight of the store.
 func (s *StoreInfo) GetRegionWeight() float64 {
 	return s.regionWeight
+}
+
+// GetHotReadWeight returns the hot read weight of the store.
+func (s *StoreInfo) GetHotReadWeight() float64 {
+	return s.hotReadWeight
+}
+
+// GetHotWriteWeight returns the hot write weight of the store.
+func (s *StoreInfo) GetHotWriteWeight() float64 {
+	return s.hotWriteWeight
 }
 
 // GetLastHeartbeatTS returns the last heartbeat timestamp of the store.

@@ -38,13 +38,13 @@ func NewHotCache() *HotCache {
 }
 
 // CheckWrite checks the write status, returns update items.
-func (w *HotCache) CheckWrite(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region)
+func (w *HotCache) CheckWrite(region *core.RegionInfo, weights map[uint64]float64) []*HotPeerStat {
+	return w.writeFlow.CheckRegionFlow(region, weights)
 }
 
 // CheckRead checks the read status, returns update items.
-func (w *HotCache) CheckRead(region *core.RegionInfo) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region)
+func (w *HotCache) CheckRead(region *core.RegionInfo, weights map[uint64]float64) []*HotPeerStat {
+	return w.readFlow.CheckRegionFlow(region, weights)
 }
 
 // Update updates the cache.

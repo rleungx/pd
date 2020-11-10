@@ -102,7 +102,7 @@ func testCache(c *C, t *testCacheCase) {
 }
 
 func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect int) []*HotPeerStat {
-	res := cache.CheckRegionFlow(region)
+	res := cache.CheckRegionFlow(region, map[uint64]float64{})
 	c.Assert(res, HasLen, expect)
 	for _, p := range res {
 		cache.Update(p)

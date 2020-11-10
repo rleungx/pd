@@ -81,7 +81,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	rc := leaderServer.GetRaftCluster()
 	for i := statistics.DefaultWriteMfSize; i > 0; i-- {
 		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: uint64(now - 10*i), EndTimestamp: uint64(now - 10*i + 10)}
-		rc.GetStoresStats().Observe(ss.GetID(), newStats)
+		rc.GetStoresStats().Observe(ss.GetID(), newStats, 1.0, 1.0)
 	}
 
 	args := []string{"-u", pdAddr, "hot", "store"}

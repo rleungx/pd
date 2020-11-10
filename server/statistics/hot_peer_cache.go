@@ -119,7 +119,7 @@ func (f *hotPeerCache) collectRegionMetrics(byteRate, keyRate float64, interval 
 }
 
 // CheckRegionFlow checks the flow information of region.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerStat) {
+func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, weights map[uint64]float64) (ret []*HotPeerStat) {
 	bytes := float64(f.getRegionBytes(region))
 	keys := float64(f.getRegionKeys(region))
 
@@ -148,12 +148,16 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 			continue
 		}
 
+		weight, ok := weights[storeID]
+		if !ok {
+			weight = 1.0
+		}
 		newItem := &HotPeerStat{
 			StoreID:        storeID,
 			RegionID:       region.GetID(),
 			Kind:           f.kind,
-			ByteRate:       byteRate,
-			KeyRate:        keyRate,
+			ByteRate:       byteRate / weight,
+			KeyRate:        keyRate / weight,
 			LastUpdateTime: time.Now(),
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
@@ -173,7 +177,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo) (ret []*HotPeerS
 			}
 		}
 
-		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, time.Duration(interval))
+		newItem = f.updateHotPeerStat(newItem, oldItem, bytes, keys, weight, time.Duration(interval))
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -313,7 +317,7 @@ func (f *hotPeerCache) getDefaultTimeMedian() *TimeMedian {
 	return NewTimeMedian(DefaultAotSize, rollingWindowsSize, RegionHeartBeatReportInterval)
 }
 
-func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, keys, weight float64, interval time.Duration) *HotPeerStat {
 	thresholds := f.calcHotThresholds(newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[byteDim] || // if interval is zero, rate will be NaN, isHot will be false
 		newItem.KeyRate >= thresholds[keyDim]
@@ -344,8 +348,8 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes, k
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
-	newItem.RollingByteRate.Add(bytes, interval*time.Second)
-	newItem.RollingKeyRate.Add(keys, interval*time.Second)
+	newItem.RollingByteRate.Add(bytes/weight, interval*time.Second)
+	newItem.RollingKeyRate.Add(keys/weight, interval*time.Second)
 
 	return newItem
 }
