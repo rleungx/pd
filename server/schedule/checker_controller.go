@@ -57,35 +57,37 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-	checkerIsBusy := true
+	checkerIsBusy := false
 	if c.cluster.IsPlacementRulesEnabled() {
 		if op := c.ruleChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-				checkerIsBusy = false
-				return checkerIsBusy, []*operator.Operator{op}
+			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
+				checkerIsBusy = true
+				c.regionWaitingList.Put(region.GetID(), nil)
+				return checkerIsBusy, nil
 			}
-			c.regionWaitingList.Put(region.GetID(), nil)
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
 			return false, []*operator.Operator{op}
 		}
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-				checkerIsBusy = false
-				return checkerIsBusy, []*operator.Operator{op}
+			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
+				checkerIsBusy = true
+				c.regionWaitingList.Put(region.GetID(), nil)
+				return checkerIsBusy, nil
 			}
-			c.regionWaitingList.Put(region.GetID(), nil)
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	}
 
 	if ops := c.mergeChecker.Check(region); ops != nil {
-		if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-			checkerIsBusy = false
-			// It makes sure that two operators can be added successfully altogether.
-			return checkerIsBusy, ops
+		if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
+			checkerIsBusy = true
+			c.regionWaitingList.Put(region.GetID(), nil)
+			return checkerIsBusy, nil
 		}
-		c.regionWaitingList.Put(region.GetID(), nil)
+		return checkerIsBusy, ops
 	}
 	return checkerIsBusy, nil
 }
