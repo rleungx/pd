@@ -213,10 +213,13 @@ func (c *coordinator) checkWaitingRegions() {
 		if checkerIsBusy {
 			continue
 		}
-		if len(ops) > 0 {
-			c.opController.AddWaitingOperator(ops...)
+
+		if !c.opController.ExceedStoreLimit(ops...) {
+			if len(ops) > 0 {
+				c.opController.AddWaitingOperator(ops...)
+			}
+			c.checkers.RemoveWaitingRegion(id)
 		}
-		c.checkers.RemoveWaitingRegion(id)
 	}
 }
 

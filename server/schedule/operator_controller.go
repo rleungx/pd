@@ -301,12 +301,19 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 	return added
 }
 
+// ExceedStoreLimit ...
+func (oc *OperatorController) ExceedStoreLimit(ops ...*operator.Operator) bool {
+	oc.Lock()
+	defer oc.Unlock()
+	return oc.exceedStoreLimitLocked(ops...)
+}
+
 // AddOperator adds operators to the running operators.
 func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
 
-	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
+	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
 			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 			_ = op.Cancel()
@@ -335,7 +342,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 		}
 		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
 
-		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
+		if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote_canceled").Inc()
 				_ = op.Cancel()
@@ -883,8 +890,8 @@ func (o *OperatorRecords) Put(op *operator.Operator) {
 	o.ttl.Put(id, record)
 }
 
-// exceedStoreLimit returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
-func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
+// exceedStoreLimitLocked returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
+func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) bool {
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {
