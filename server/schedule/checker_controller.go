@@ -59,35 +59,32 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	opController := c.opController
 	checkerIsBusy := true
 	if c.cluster.IsPlacementRulesEnabled() {
-		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.ruleChecker.Check(region); op != nil {
+		if op := c.ruleChecker.Check(region); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+				checkerIsBusy = false
 				return checkerIsBusy, []*operator.Operator{op}
 			}
-		} else {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
 			return false, []*operator.Operator{op}
 		}
-		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.replicaChecker.Check(region); op != nil {
+		if op := c.replicaChecker.Check(region); op != nil {
+			if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+				checkerIsBusy = false
 				return checkerIsBusy, []*operator.Operator{op}
 			}
-		} else {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	}
 
-	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-		checkerIsBusy = false
-		if ops := c.mergeChecker.Check(region); ops != nil {
+	if ops := c.mergeChecker.Check(region); ops != nil {
+		if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+			checkerIsBusy = false
 			// It makes sure that two operators can be added successfully altogether.
 			return checkerIsBusy, ops
 		}
-	} else {
 		c.regionWaitingList.Put(region.GetID(), nil)
 	}
 	return checkerIsBusy, nil
