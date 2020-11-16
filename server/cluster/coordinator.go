@@ -199,8 +199,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
 	log.Info("check waiting regions", zap.Int("waiting-length", len(items)))
-	for _, item := range items {
-		id := item.Key
+	for id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
 			// the region could be recent split, continue to wait.

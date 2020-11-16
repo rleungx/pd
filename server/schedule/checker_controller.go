@@ -35,7 +35,7 @@ type CheckerController struct {
 	replicaChecker    *checker.ReplicaChecker
 	ruleChecker       *checker.RuleChecker
 	mergeChecker      *checker.MergeChecker
-	regionWaitingList cache.Cache
+	regionWaitingList map[uint64]struct{}
 }
 
 // NewCheckerController create a new CheckerController.
@@ -48,7 +48,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		replicaChecker:    checker.NewReplicaChecker(cluster),
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
-		regionWaitingList: cache.NewCache(DefaultCacheSize, cache.DefaultCacheType),
+		regionWaitingList: make(map[uint64]struct{})
 	}
 }
 
@@ -62,7 +62,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		if op := c.ruleChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 				checkerIsBusy = true
-				c.regionWaitingList.Put(region.GetID(), nil)
+				c.regionWaitingList[region.GetID()]= struct{}{}
 				return checkerIsBusy, nil
 			}
 			return checkerIsBusy, []*operator.Operator{op}
@@ -74,7 +74,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		if op := c.replicaChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 				checkerIsBusy = true
-				c.regionWaitingList.Put(region.GetID(), nil)
+				c.regionWaitingList[region.GetID()]= struct{}{}
 				return checkerIsBusy, nil
 			}
 			return checkerIsBusy, []*operator.Operator{op}
@@ -84,7 +84,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	if ops := c.mergeChecker.Check(region); ops != nil {
 		if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
 			checkerIsBusy = true
-			c.regionWaitingList.Put(region.GetID(), nil)
+			c.regionWaitingList[region.GetID()]= struct{}{}
 			return checkerIsBusy, nil
 		}
 		return checkerIsBusy, ops
@@ -98,11 +98,11 @@ func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
-func (c *CheckerController) GetWaitingRegions() []*cache.Item {
-	return c.regionWaitingList.Elems()
+func (c *CheckerController) GetWaitingRegions() map[uint64]struct{} {
+	return c.regionWaitingList
 }
 
 // RemoveWaitingRegion removes the region from the waiting list.
 func (c *CheckerController) RemoveWaitingRegion(id uint64) {
-	c.regionWaitingList.Remove(id)
+	delete(c.regionWaitingList, id)
 }
