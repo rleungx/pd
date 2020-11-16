@@ -16,7 +16,6 @@ package schedule
 import (
 	"context"
 
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -48,7 +47,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		replicaChecker:    checker.NewReplicaChecker(cluster),
 		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
 		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
-		regionWaitingList: make(map[uint64]struct{})
+		regionWaitingList: make(map[uint64]struct{}),
 	}
 }
 
@@ -62,7 +61,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		if op := c.ruleChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 				checkerIsBusy = true
-				c.regionWaitingList[region.GetID()]= struct{}{}
+				c.regionWaitingList[region.GetID()] = struct{}{}
 				return checkerIsBusy, nil
 			}
 			return checkerIsBusy, []*operator.Operator{op}
@@ -74,7 +73,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 		if op := c.replicaChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 				checkerIsBusy = true
-				c.regionWaitingList[region.GetID()]= struct{}{}
+				c.regionWaitingList[region.GetID()] = struct{}{}
 				return checkerIsBusy, nil
 			}
 			return checkerIsBusy, []*operator.Operator{op}
@@ -84,7 +83,7 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	if ops := c.mergeChecker.Check(region); ops != nil {
 		if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
 			checkerIsBusy = true
-			c.regionWaitingList[region.GetID()]= struct{}{}
+			c.regionWaitingList[region.GetID()] = struct{}{}
 			return checkerIsBusy, nil
 		}
 		return checkerIsBusy, ops
