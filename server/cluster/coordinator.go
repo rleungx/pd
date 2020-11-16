@@ -105,25 +105,7 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		// Check suspect regions first.
-		for _, id := range c.cluster.GetSuspectRegions() {
-			region := c.cluster.GetRegion(id)
-			if region == nil {
-				// the region could be recent split, continue to wait.
-				continue
-			}
-			if c.opController.GetOperator(id) != nil {
-				c.cluster.RemoveSuspectRegion(id)
-				continue
-			}
-			checkerIsBusy, ops := c.checkers.CheckRegion(region)
-			if checkerIsBusy {
-				continue
-			}
-			if len(ops) > 0 {
-				c.opController.AddWaitingOperator(ops...)
-			}
-			c.cluster.RemoveSuspectRegion(id)
-		}
+		c.checkSuspectRegions()
 
 		// Check suspect key ranges
 		c.checkSuspectKeyRanges()
@@ -160,6 +142,28 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.cluster.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			c.cluster.RemoveSuspectRegion(id)
+			continue
+		}
+		checkerIsBusy, ops := c.checkers.CheckRegion(region)
+		if checkerIsBusy {
+			continue
+		}
+		if len(ops) > 0 {
+			c.opController.AddWaitingOperator(ops...)
+		}
+		c.cluster.RemoveSuspectRegion(id)
+	}
+}
+
 // checkSuspectKeyRanges would pop one suspect key range group
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
@@ -189,6 +193,32 @@ func (c *coordinator) checkSuspectKeyRanges() {
 		c.cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
 	}
 	c.cluster.AddSuspectRegions(regionIDList...)
+}
+
+func (c *coordinator) checkRegionWaitingList() {
+	regionWaitingList := c.checkers.GetRegionWaitingList()
+	log.Info("check region waiting list", zap.Int("wait-length", len(regionWaitingList)))
+	for id := range regionWaitingList {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			// the region could be recent split, continue to wait.
+			continue
+		}
+		if c.opController.GetOperator(id) != nil {
+			log.Info("remove region from waiting list", zap.Uint64("region-id", id), zap.String("reason", "exist operator"))
+			c.checkers.RemoveRegionFromList(id)
+			continue
+		}
+		checkerIsBusy, ops := c.checkers.CheckRegion(region)
+		if checkerIsBusy {
+			continue
+		}
+		if len(ops) > 0 {
+			c.opController.AddWaitingOperator(ops...)
+			log.Info("remove region from waiting list", zap.Uint64("region-id", id), zap.String("reason", "add to waiting"))
+			c.checkers.RemoveRegionFromList(id)
+		}
+	}
 }
 
 // drivePushOperator is used to push the unfinished operator to the excutor.

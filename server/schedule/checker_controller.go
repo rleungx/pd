@@ -16,33 +16,37 @@ package schedule
 import (
 	"context"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
+	"go.uber.org/zap"
 )
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
-	cluster        opt.Cluster
-	opController   *OperatorController
-	learnerChecker *checker.LearnerChecker
-	replicaChecker *checker.ReplicaChecker
-	ruleChecker    *checker.RuleChecker
-	mergeChecker   *checker.MergeChecker
+	cluster           opt.Cluster
+	opController      *OperatorController
+	learnerChecker    *checker.LearnerChecker
+	replicaChecker    *checker.ReplicaChecker
+	ruleChecker       *checker.RuleChecker
+	mergeChecker      *checker.MergeChecker
+	regionWaitingList map[uint64]struct{}
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
 func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
 	return &CheckerController{
-		cluster:        cluster,
-		opController:   opController,
-		learnerChecker: checker.NewLearnerChecker(cluster),
-		replicaChecker: checker.NewReplicaChecker(cluster),
-		ruleChecker:    checker.NewRuleChecker(cluster, ruleManager),
-		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
+		cluster:           cluster,
+		opController:      opController,
+		learnerChecker:    checker.NewLearnerChecker(cluster),
+		replicaChecker:    checker.NewReplicaChecker(cluster),
+		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager),
+		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
+		regionWaitingList: make(map[uint64]struct{}),
 	}
 }
 
@@ -58,6 +62,9 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
+			log.Info("add region to placement waiting list", zap.Uint64("region-id", region.GetID()))
+			c.regionWaitingList[region.GetID()] = struct{}{}
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
@@ -68,6 +75,9 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			if op := c.replicaChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
+		} else {
+			log.Info("add region to replica waiting list", zap.Uint64("region-id", region.GetID()))
+			c.regionWaitingList[region.GetID()] = struct{}{}
 		}
 	}
 
@@ -77,6 +87,9 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			// It makes sure that two operators can be added successfully altogether.
 			return checkerIsBusy, ops
 		}
+	} else {
+		log.Info("add region to merge waiting list", zap.Uint64("region-id", region.GetID()))
+		c.regionWaitingList[region.GetID()] = struct{}{}
 	}
 	return checkerIsBusy, nil
 }
@@ -84,4 +97,14 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 // GetMergeChecker returns the merge checker.
 func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
 	return c.mergeChecker
+}
+
+// GetRegionWaitingList returns the region waiting list.
+func (c *CheckerController) GetRegionWaitingList() map[uint64]struct{} {
+	return c.regionWaitingList
+}
+
+// RemoveRegionFromList removes the region from waiting list.
+func (c *CheckerController) RemoveRegionFromList(id uint64) {
+	delete(c.regionWaitingList, id)
 }
