@@ -315,7 +315,6 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 
 	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
-			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 			_ = op.Cancel()
 			oc.buryOperator(op)
 		}

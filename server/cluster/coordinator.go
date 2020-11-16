@@ -198,6 +198,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
+	log.Info("check waiting regions", zap.Int("waiting-length", len(items)))
 	for _, item := range items {
 		id := item.Key
 		region := c.cluster.GetRegion(id)
@@ -214,10 +215,13 @@ func (c *coordinator) checkWaitingRegions() {
 			continue
 		}
 
+		if len(ops) == 0 {
+			c.checkers.RemoveWaitingRegion(id)
+			continue
+		}
+
 		if !c.opController.ExceedStoreLimit(ops...) {
-			if len(ops) > 0 {
-				c.opController.AddWaitingOperator(ops...)
-			}
+			c.opController.AddWaitingOperator(ops...)
 			c.checkers.RemoveWaitingRegion(id)
 		}
 	}
