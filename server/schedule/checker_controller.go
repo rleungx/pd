@@ -87,9 +87,6 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 			// It makes sure that two operators can be added successfully altogether.
 			return checkerIsBusy, ops
 		}
-	} else {
-		log.Info("add region to merge waiting list", zap.Uint64("region-id", region.GetID()))
-		c.regionWaitingList[region.GetID()] = struct{}{}
 	}
 	return checkerIsBusy, nil
 }
