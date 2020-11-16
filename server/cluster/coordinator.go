@@ -110,6 +110,8 @@ func (c *coordinator) patrolRegions() {
 		// Check suspect key ranges
 		c.checkSuspectKeyRanges()
 
+		c.checkRegionWaitingList()
+
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
