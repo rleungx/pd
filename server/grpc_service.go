@@ -111,10 +111,12 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if elapsed > slowThreshold {
 			log.Warn("get timestamp too slow", zap.Duration("cost", elapsed))
 		}
+
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
 			Timestamp: &ts,
 			Count:     count,
+			CpuUsage:  s.tsoAllocatorManager.GetCPUUsage(),
 		}
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)

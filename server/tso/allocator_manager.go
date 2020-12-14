@@ -21,10 +21,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -96,10 +98,12 @@ type AllocatorManager struct {
 		sync.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
+	cpuUsage uint64
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
+	ctx context.Context,
 	m *member.Member,
 	rootPath string,
 	saveInterval time.Duration,
@@ -118,7 +122,26 @@ func NewAllocatorManager(
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*dcLocationInfo)
 	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
+	go allocatorManager.updateCPUUsage(ctx)
 	return allocatorManager
+}
+
+func (am *AllocatorManager) updateCPUUsage(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			time.Sleep(100 * time.Millisecond)
+			percentage, _ := cpu.Percent(0, false)
+			atomic.StoreUint64(&am.cpuUsage, uint64(percentage[0]))
+		}
+	}
+}
+
+// GetCPUUsage ...
+func (am *AllocatorManager) GetCPUUsage() uint64 {
+	return atomic.LoadUint64(&am.cpuUsage)
 }
 
 // SetLocalTSOConfig receives a `LocalTSOConfig` and write it into etcd to make the whole

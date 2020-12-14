@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -153,12 +154,15 @@ type lastTSO struct {
 }
 
 const (
-	defaultPDTimeout      = 3 * time.Second
-	dialTimeout           = 3 * time.Second
-	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval = time.Minute
-	maxMergeTSORequests   = 10000 // should be higher if client is sending requests in burst
-	maxInitClusterRetries = 100
+	defaultPDTimeout       = 3 * time.Second
+	dialTimeout            = 3 * time.Second
+	updateLeaderTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval  = time.Minute
+	maxMergeTSORequests    = 10000 // should be higher if client is sending requests in burst
+	maxInitClusterRetries  = 100
+	defaultMaxTSOWaitTime  = 1 * time.Millisecond
+	defaultMaxTSOBatchSize = 1000
+	defaultCPUThreshold    = 60
 )
 
 var (
@@ -318,12 +322,13 @@ func (c *client) tsLoop() {
 				// this goroutine should exit.
 				go func(dc string, tsoDispatcher chan *tsoRequest) {
 					var (
-						err      error
-						ctx      context.Context
-						cancel   context.CancelFunc
-						stream   pdpb.PD_TsoClient
-						opts     []opentracing.StartSpanOption
-						requests = make([]*tsoRequest, maxMergeTSORequests+1)
+						err               error
+						ctx               context.Context
+						cancel            context.CancelFunc
+						stream            pdpb.PD_TsoClient
+						opts              []opentracing.StartSpanOption
+						requests          = make([]*tsoRequest, maxMergeTSORequests+1)
+						bestBatchWaitSize int
 					)
 					defer func() {
 						if cancel != nil {
@@ -356,7 +361,24 @@ func (c *client) tsLoop() {
 								}
 								continue
 							}
+							bestBatchWaitSize = c.maxTSOBatchSize
 						}
+
+						pendingReqs := len(tsoDispatcher)
+
+						if pendingReqs < bestBatchWaitSize && c.maxTSOWaitTime.Microseconds() > 0 {
+							if atomic.LoadUint64(&c.cpuUsage) >= defaultCPUThreshold {
+								c.fetchMorePendingRequests(loopCtx, tsoDispatcher)
+							}
+						}
+
+						if pendingReqs < bestBatchWaitSize && bestBatchWaitSize > 1 {
+							// Waits too long to collect requests, reduce the target batch size.
+							bestBatchWaitSize--
+						} else if pendingReqs > bestBatchWaitSize+4 && bestBatchWaitSize < c.maxTSOBatchSize {
+							bestBatchWaitSize++
+						}
+
 						select {
 						case first := <-tsoDispatcher:
 							pendingPlus1 := len(tsoDispatcher) + 1
@@ -460,6 +482,10 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
 	tsoBatchSize.Observe(float64(count))
+	cpuUsage := resp.GetCpuUsage()
+	if cpuUsage > 0 && c.maxTSOWaitTime > 0 {
+		atomic.StoreUint64(&c.cpuUsage, cpuUsage)
+	}
 
 	if resp.GetCount() != uint32(len(requests)) {
 		err = errors.WithStack(errTSOLength)
@@ -1047,4 +1073,19 @@ func addrsToUrls(addrs []string) []string {
 		}
 	}
 	return urls
+}
+
+func (c *client) fetchMorePendingRequests(ctx context.Context, tsoDispatcher chan *tsoRequest) {
+	timer := time.NewTimer(c.maxTSOWaitTime)
+	defer timer.Stop()
+	for len(tsoDispatcher) < c.maxTSOBatchSize {
+		select {
+		case <-timer.C:
+			return
+		case <-ctx.Done():
+			return
+		default:
+			time.Sleep(200 * time.Microsecond)
+		}
+	}
 }
