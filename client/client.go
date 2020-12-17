@@ -160,7 +160,7 @@ const (
 	tsLoopDCCheckInterval  = time.Minute
 	maxMergeTSORequests    = 10000 // should be higher if client is sending requests in burst
 	maxInitClusterRetries  = 100
-	defaultMaxTSOWaitTime  = 1 * time.Millisecond
+	defaultMaxTSOWaitTime  = 10 * time.Millisecond
 	defaultMaxTSOBatchSize = 1000
 	defaultCPUThreshold    = 60
 )
