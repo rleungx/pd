@@ -782,8 +782,8 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.Future
+	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.Future
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
 	totalKeysRate := dstLd.KeyRate + srcLd.KeyRate
