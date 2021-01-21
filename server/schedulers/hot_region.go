@@ -540,6 +540,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
+				log.Info("store", zap.Any("srcStoreID", srcStoreID), zap.Any("dstStoreID", dstStoreID))
 				bs.calcProgressiveRank()
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
