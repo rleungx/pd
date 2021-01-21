@@ -579,19 +579,25 @@ func (bs *balanceSolver) allowBalance() bool {
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
-		if bs.cluster.GetStore(id) == nil {
+		store := bs.cluster.GetStore(id)
+		if store == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", id), errs.ZapError(errs.ErrGetSourceStore))
 			continue
 		}
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.ByteRate &&
+
+		if core.IsTiFlashStore(store.GetMeta()) {
+			ret[id] = detail
+			hotSchedulerResultCounter.WithLabelValues("src-tiflash-store-succ", strconv.FormatUint(id, 10)).Inc()
+		} else if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.ByteRate &&
 			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Expect.KeyRate {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		} else {
+			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 		}
-		hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -756,12 +762,17 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 	for _, store := range candidates {
 		if filter.Target(bs.cluster.GetOpts(), store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Expect.ByteRate &&
+
+			if core.IsTiFlashStore(store.GetMeta()) {
+				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
+				hotSchedulerResultCounter.WithLabelValues("dst-tiflash-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+			} else if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Expect.ByteRate &&
 				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Expect.KeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+			} else {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
-			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 		}
 	}
 	return ret
@@ -774,34 +785,31 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
+	totalKeysRate := dstLd.KeyRate + srcLd.KeyRate
+	keyDiffAfter := math.Abs((dstLd.KeyRate+peer.GetKeyRate())/totalKeysRate - (srcLd.KeyRate-peer.GetKeyRate())/totalKeysRate)
+	keyDiffBefore := math.Abs(dstLd.KeyRate/totalKeysRate - srcLd.KeyRate/totalKeysRate)
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+		if keyDiffAfter < keyDiffBefore {
 			rank = -1
 		}
 	} else {
-		getSrcDecRate := func(a, b float64) float64 {
-			if a-b <= 0 {
-				return 1
-			}
-			return a - b
-		}
-		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
-		// than the src store's (key/byte) rate after scheduling one peer.
-		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
-		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
-		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
-		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
+
+		totalBytesRate := dstLd.ByteRate + srcLd.ByteRate
+		bytesDiffAfter := math.Abs((dstLd.ByteRate+peer.GetByteRate())/totalBytesRate - (srcLd.ByteRate-peer.GetByteRate())/totalBytesRate)
+		bytesDiffBefore := math.Abs(dstLd.ByteRate/totalBytesRate - srcLd.ByteRate/totalBytesRate)
+		byteHot := peer.GetByteRate() >= bs.sche.conf.GetMinHotByteRate()
+
 		switch {
-		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+		case byteHot && bytesDiffAfter < bytesDiffBefore && keyHot && keyDiffAfter < keyDiffBefore:
 			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
 			rank = -3
-		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+		case bytesDiffAfter <= bytesDiffBefore && keyHot && keyDiffAfter < keyDiffBefore:
 			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
 			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio:
+		case byteHot && bytesDiffAfter < bytesDiffBefore:
 			// If belong to the case, byte rate will be more balanced, ignore the key rate.
 			rank = -1
 		}
