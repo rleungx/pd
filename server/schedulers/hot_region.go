@@ -804,8 +804,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteHot := peer.GetByteRate() >= bs.sche.conf.GetMinHotByteRate()
 
 		log.Info("peer stat", zap.Any("peer.GetByteRate()", peer.GetByteRate()))
-		log.Info("key stat", zap.Any("keyHot", keyHot), zap.Any("keyDiffAfter", keyDiffAfter), zap.Any("keyDiffBefore", keyDiffBefore))
-		log.Info("byte stat", zap.Any("byteHot", byteHot), zap.Any("bytesDiffAfter", bytesDiffAfter), zap.Any("bytesDiffBefore", bytesDiffBefore))
+		log.Info("key stat", zap.Any("keyHot", keyHot), zap.Any("dstLd.KeyRate", dstLd.KeyRate), zap.Any("srcLd.KeyRate", srcLd.KeyRate), zap.Any("keyDiffAfter", keyDiffAfter), zap.Any("keyDiffBefore", keyDiffBefore))
+		log.Info("byte stat", zap.Any("byteHot", byteHot), zap.Any("dstLd.ByteRate", dstLd.ByteRate), zap.Any("srcLd.ByteRate", srcLd.ByteRate), zap.Any("bytesDiffAfter", bytesDiffAfter), zap.Any("bytesDiffBefore", bytesDiffBefore))
 		switch {
 		case byteHot && bytesDiffAfter < bytesDiffBefore && keyHot && keyDiffAfter < keyDiffBefore:
 			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
