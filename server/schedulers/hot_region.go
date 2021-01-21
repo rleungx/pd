@@ -786,17 +786,18 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	totalKeysRate := dstLd.KeyRate + srcLd.KeyRate
-	keyDiffAfter := math.Abs((dstLd.KeyRate+peer.GetKeyRate())/totalKeysRate - (srcLd.KeyRate-peer.GetKeyRate())/totalKeysRate)
-	keyDiffBefore := math.Abs(dstLd.KeyRate/totalKeysRate - srcLd.KeyRate/totalKeysRate)
+
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about key rate.
-		if keyDiffAfter < keyDiffBefore {
+		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
 			rank = -1
 		}
 	} else {
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
+		totalKeysRate := dstLd.KeyRate + srcLd.KeyRate
+		keyDiffAfter := math.Abs((dstLd.KeyRate+peer.GetKeyRate())/totalKeysRate - (srcLd.KeyRate-peer.GetKeyRate())/totalKeysRate)
+		keyDiffBefore := math.Abs(dstLd.KeyRate/totalKeysRate - srcLd.KeyRate/totalKeysRate)
 
 		totalBytesRate := dstLd.ByteRate + srcLd.ByteRate
 		bytesDiffAfter := math.Abs((dstLd.ByteRate+peer.GetByteRate())/totalBytesRate - (srcLd.ByteRate-peer.GetByteRate())/totalBytesRate)
