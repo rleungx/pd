@@ -803,7 +803,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		bytesDiffBefore := math.Abs(dstLd.ByteRate/totalBytesRate - srcLd.ByteRate/totalBytesRate)
 		byteHot := peer.GetByteRate() >= bs.sche.conf.GetMinHotByteRate()
 
-		log.Info("peer stat", zap.Any("peer.GetByteRate()", peer.GetByteRate()))
+		log.Info("peer stat", zap.Any("peer.GetByteRate()", peer.GetByteRate()), zap.Any("peer.GetKeyRate()", peer.GetKeyRate()))
 		log.Info("key stat", zap.Any("keyHot", keyHot), zap.Any("dstLd.KeyRate", dstLd.KeyRate), zap.Any("srcLd.KeyRate", srcLd.KeyRate), zap.Any("keyDiffAfter", keyDiffAfter), zap.Any("keyDiffBefore", keyDiffBefore))
 		log.Info("byte stat", zap.Any("byteHot", byteHot), zap.Any("dstLd.ByteRate", dstLd.ByteRate), zap.Any("srcLd.ByteRate", srcLd.ByteRate), zap.Any("bytesDiffAfter", bytesDiffAfter), zap.Any("bytesDiffBefore", bytesDiffBefore))
 		switch {
