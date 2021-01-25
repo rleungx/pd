@@ -782,9 +782,52 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.Future
-	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.Future
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
+
+	// TODO: unify the way to calculate the rank
+	if core.IsTiFlashStore(bs.cluster.GetStore(bs.cur.srcStoreID).GetMeta()) && core.IsTiFlashStore(bs.cluster.GetStore(bs.cur.dstStoreID).GetMeta()) {
+		bs.calculateTiFlashRank(srcLd, dstLd, peer)
+		return
+	}
+	rank := int64(0)
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		// In this condition, CPU usage is the matter.
+		// Only consider about key rate.
+		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+			rank = -1
+		}
+	} else {
+		getSrcDecRate := func(a, b float64) float64 {
+			if a-b <= 0 {
+				return 1
+			}
+			return a - b
+		}
+		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
+		// than the src store's (key/byte) rate after scheduling one peer.
+		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
+		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
+		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
+		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
+		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
+		switch {
+		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
+			rank = -3
+		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
+			// If belong to the case, byte rate will be not worsened, key rate will be more balanced.
+			rank = -2
+		case byteHot && byteDecRatio <= greatDecRatio:
+			// If belong to the case, byte rate will be more balanced, ignore the key rate.
+			rank = -1
+		}
+	}
+	bs.cur.progressiveRank = rank
+}
+
+func (bs *balanceSolver) calculateTiFlashRank(srcLd, dstLd *storeLoad, peer *statistics.HotPeerStat) {
 	rank := int64(0)
 	totalKeysRate := dstLd.KeyRate + srcLd.KeyRate
 	keyDiffAfter := math.Abs((dstLd.KeyRate+peer.GetKeyRate())/totalKeysRate - (srcLd.KeyRate-peer.GetKeyRate())/totalKeysRate)
@@ -803,9 +846,6 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		bytesDiffBefore := math.Abs(dstLd.ByteRate/totalBytesRate - srcLd.ByteRate/totalBytesRate)
 		byteHot := peer.GetByteRate() >= bs.sche.conf.GetMinHotByteRate()
 
-		log.Info("peer stat", zap.Any("peer.GetByteRate()", peer.GetByteRate()), zap.Any("peer.GetKeyRate()", peer.GetKeyRate()))
-		log.Info("key stat", zap.Any("keyHot", keyHot), zap.Any("dstLd.KeyRate", dstLd.KeyRate), zap.Any("srcLd.KeyRate", srcLd.KeyRate), zap.Any("keyDiffAfter", keyDiffAfter), zap.Any("keyDiffBefore", keyDiffBefore))
-		log.Info("byte stat", zap.Any("byteHot", byteHot), zap.Any("dstLd.ByteRate", dstLd.ByteRate), zap.Any("srcLd.ByteRate", srcLd.ByteRate), zap.Any("bytesDiffAfter", bytesDiffAfter), zap.Any("bytesDiffBefore", bytesDiffBefore))
 		switch {
 		case byteHot && bytesDiffAfter < bytesDiffBefore && keyHot && keyDiffAfter < keyDiffBefore:
 			// If belong to the case, both byte rate and key rate will be more balanced, the best choice.
