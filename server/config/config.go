@@ -726,7 +726,8 @@ type ScheduleConfig struct {
 	// overwrite the auto-tuned value by pd-ctl, when the value
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+	StoreLimitMode  string `toml:"store-limit-mode" json:"store-limit-mode"`
+	SchedulingScene string `toml:"scheduling-scene" json:"scheduling-scene"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -772,6 +773,7 @@ const (
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
+	defaultSchedulingScene             = "def"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -819,6 +821,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	}
+	if !meta.IsDefined("scheduling-scene") {
+		adjustString(&c.SchedulingScene, defaultSchedulingScene)
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus

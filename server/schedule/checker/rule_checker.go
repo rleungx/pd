@@ -109,7 +109,14 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceRulePeer(region, rf, peer, offlineStatus)
+			op, err := c.replaceRulePeer(region, rf, peer, offlineStatus)
+			if err != nil {
+				return op, err
+			}
+			if c.cluster.GetCurrentScene() == "offline" {
+				op.SetPriorityLevel(core.HighestPriority)
+			}
+			return op, err
 		}
 	}
 	// fix loose matched peers.

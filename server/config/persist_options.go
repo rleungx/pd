@@ -398,6 +398,11 @@ func (o *PersistOptions) GetStoreLimitMode() string {
 	return o.GetScheduleConfig().StoreLimitMode
 }
 
+// GetSchedulingScene returns the scheduling scene.
+func (o *PersistOptions) GetSchedulingScene() string {
+	return o.GetScheduleConfig().SchedulingScene
+}
+
 // GetTolerantSizeRatio gets the tolerant size ratio.
 func (o *PersistOptions) GetTolerantSizeRatio() float64 {
 	return o.GetScheduleConfig().TolerantSizeRatio

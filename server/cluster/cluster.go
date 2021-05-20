@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/scene"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -122,7 +123,8 @@ type RaftCluster struct {
 	traceRegionFlow bool
 
 	// It's used to manage components.
-	componentManager *component.Manager
+	componentManager       *component.Manager
+	schedulingSceneManager *scene.SchedulingSceneManager
 }
 
 // Status saves some state information.
@@ -251,6 +253,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
+	c.schedulingSceneManager = scene.NewSchedulingSceneManager(c.ctx, c.GetOpts(), s.GetStorage())
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
@@ -1754,6 +1757,10 @@ func (c *RaftCluster) GetClusterVersion() string {
 // GetEtcdClient returns the current etcd client
 func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
+}
+
+func (c *RaftCluster) GetCurrentScene() string {
+	return c.schedulingSceneManager.GetCurrentScene()
 }
 
 var healthURL = "/pd/api/v1/ping"

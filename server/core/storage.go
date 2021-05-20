@@ -38,6 +38,7 @@ import (
 const (
 	clusterPath                = "raft"
 	configPath                 = "config"
+	scenePath                  = "scene"
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
@@ -244,6 +245,31 @@ func (s *Storage) SaveConfig(cfg interface{}) error {
 // LoadConfig loads config from configPath then unmarshal it to cfg.
 func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := s.Load(configPath)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
+}
+
+// SaveConfig stores marshallable cfg to the configPath.
+func (s *Storage) SaveScene(scene string, cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return s.Save(scenePath+"/"+scene, string(value))
+}
+
+// LoadConfig loads config from configPath then unmarshal it to cfg.
+func (s *Storage) LoadScene(scene string, cfg interface{}) (bool, error) {
+	value, err := s.Load(scenePath + "/" + scene)
 	if err != nil {
 		return false, err
 	}

@@ -44,6 +44,7 @@ type Cluster interface {
 	RemoveScheduler(name string) error
 	IsFeatureSupported(f versioninfo.Feature) bool
 	AddSuspectRegions(ids ...uint64)
+	GetCurrentScene() string
 }
 
 // HeartbeatStream is an interface.

@@ -21,6 +21,7 @@ const (
 	LowPriority PriorityLevel = iota
 	NormalPriority
 	HighPriority
+	HighestPriority
 )
 
 // ScheduleKind distinguishes resources and schedule policy.
