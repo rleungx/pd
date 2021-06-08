@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -43,6 +44,10 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 // @Router /labels [get]
 func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	var labels []*metapb.StoreLabel
 	m := make(map[string]struct{})
 	stores := rc.GetStores()
@@ -68,6 +73,10 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /labels/stores [get]
 func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
 	filter, err := newStoresLabelFilter(name, value)

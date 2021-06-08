@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	log "github.com/sirupsen/logrus"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -202,7 +203,10 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 // @Router /region/id/{id} [get]
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
-
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
@@ -223,6 +227,10 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 // @Router /region/key/{key} [get]
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	key := vars["key"]
 	key, err := url.QueryUnescape(key)
@@ -264,6 +272,10 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 // @Router /regions [get]
 func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	regions := rc.GetRegions()
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
@@ -279,6 +291,10 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Router /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	startKey := r.URL.Query().Get("key")
 
 	limit := defaultRegionLimit
@@ -305,6 +321,10 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 // @Router /regions/count [get]
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	count := rc.GetRegionCount()
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
@@ -318,7 +338,10 @@ func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) 
 // @Router /regions/store/{id} [get]
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
-
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -484,6 +507,10 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 		return
 	}
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	regions := rc.GetRegions()
 	histSizes := make([]int64, 0, len(regions))
 	for _, region := range regions {
@@ -508,6 +535,10 @@ func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request
 		return
 	}
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	regions := rc.GetRegions()
 	histKeys := make([]int64, 0, len(regions))
 	for _, region := range regions {
@@ -562,7 +593,10 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 // @Router /regions/sibling/{id} [get]
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
-
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
 	if err != nil {
@@ -659,6 +693,10 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 // @Router /regions/accelerate-schedule [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -701,6 +739,10 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	limit := defaultRegionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
@@ -728,6 +770,10 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 // @Router /regions/scatter [post]
 func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -804,6 +850,10 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 // @Router /regions/split [post]
 func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return

@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -48,6 +49,10 @@ func newComponentHandler(svr *server.Server, rd *render.Render) *componentHandle
 // @Router /component [post]
 func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -77,6 +82,10 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 // @Router /component [delete]
 func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	component := vars["component"]
 	addr := vars["addr"]
@@ -94,6 +103,10 @@ func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
 // @Router /component [get]
 func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	addrs := rc.GetComponentManager().GetAllComponentAddrs()
 	h.rd.JSON(w, http.StatusOK, addrs)
 }
@@ -106,6 +119,10 @@ func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request)
 // @Router /component/{type} [get]
 func (h *componentHandler) GetAddress(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	component := vars["type"]
 	addrs := rc.GetComponentManager().GetComponentAddrs(component)

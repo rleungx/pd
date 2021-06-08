@@ -147,7 +147,11 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [get]
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -177,7 +181,11 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [delete]
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -186,8 +194,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, force := r.URL.Query()["force"]
-	err := rc.RemoveStore(storeID, force)
-
+	err = rc.RemoveStore(storeID, force)
 	if err != nil {
 		h.responseStoreErr(w, err, storeID)
 		return
@@ -207,7 +214,11 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/state [post]
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -216,7 +227,6 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateStr := r.URL.Query().Get("state")
-	var err error
 	if strings.EqualFold(stateStr, metapb.StoreState_Up.String()) {
 		err = rc.UpStore(storeID)
 	} else if strings.EqualFold(stateStr, metapb.StoreState_Offline.String()) {
@@ -260,7 +270,11 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/label [post]
 func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -306,7 +320,11 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/weight [post]
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -360,7 +378,11 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
 func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -440,8 +462,12 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
-	err := rc.RemoveTombStoneRecords()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	err = rc.RemoveTombStoneRecords()
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, err)
 		return
@@ -554,7 +580,11 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	if !includeTombstone {
 		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
-		rc, _ := h.GetRaftCluster()
+		rc, err := h.GetRaftCluster()
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)
 			if store == nil || store.IsTombstone() {
@@ -616,7 +646,12 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores [get]
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rc, _ := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	stores := rc.GetMetaStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),

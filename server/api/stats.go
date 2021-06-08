@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -41,6 +42,10 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 // @Router /stats/region [get]
 func (h *statsHandler) Region(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	stats := rc.GetRegionStats([]byte(startKey), []byte(endKey))
 	h.rd.JSON(w, http.StatusOK, stats)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -45,6 +46,10 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 // @Router /admin/cache/region/{id} [delete]
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
