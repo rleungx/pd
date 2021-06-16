@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -47,7 +46,7 @@ func (s *logTestSuite) TestLog(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:            1,

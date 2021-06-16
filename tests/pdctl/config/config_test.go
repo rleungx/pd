@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -69,7 +68,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:    1,
@@ -246,7 +245,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:            1,
@@ -334,7 +333,7 @@ func (s *configTestSuite) TestPlacementRuleGroups(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:            1,
@@ -398,7 +397,7 @@ func (s *configTestSuite) TestPlacementRuleBundle(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:            1,
@@ -536,7 +535,7 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:            1,
@@ -592,7 +591,7 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 
 	store := &metapb.Store{
 		Id:    1,
