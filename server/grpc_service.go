@@ -594,6 +594,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	var store *core.StoreInfo
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
@@ -603,7 +604,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}
 
 		storeID := request.Stats.GetStoreId()
-		store := rc.GetStore(storeID)
+		store = rc.GetStore(storeID)
 		if store == nil {
 			return nil, errors.Errorf("store %v not found", storeID)
 		}
@@ -623,6 +624,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
+		StoreState:        store.GetState(),
 	}
 	if rc.GetUnsafeRecoveryController() != nil {
 		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
