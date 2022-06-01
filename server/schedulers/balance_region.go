@@ -138,13 +138,25 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	stores := cluster.GetStores()
-	opts := cluster.GetOpts()
-	stores = filter.SelectSourceStores(stores, s.filters, opts)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	plan := newBalancePlan(kind, cluster, opInfluence)
+
+	plan.source = s.PickSourceStore(cluster, plan)
+	plan.region = s.PickRegion(cluster, plan)
+	plan.target = s.PickTargetStore(cluster, plan)
+
+	if op := s.ExecutePlan(plan); op != nil {
+		return []*operator.Operator{op}
+	}
+	return nil
+}
+
+func (s *balanceRegionScheduler) PickSourceStore(cluster schedule.Cluster, plan *balancePlan) *core.StoreInfo {
+	stores := cluster.GetStores()
+	opts := cluster.GetOpts()
+	stores = filter.SelectSourceStores(stores, s.filters, opts)
 
 	sort.Slice(stores, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(stores[i].GetID())
@@ -152,69 +164,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
-
-	var allowBalanceEmptyRegion func(*core.RegionInfo) bool
-
-	switch cluster.(type) {
-	case *schedule.RangeCluster:
-		// allow empty region to be scheduled in range cluster
-		allowBalanceEmptyRegion = func(region *core.RegionInfo) bool { return true }
-	default:
-		allowBalanceEmptyRegion = isAllowBalanceEmptyRegion(cluster)
+	if len(stores) != 0 {
+		return stores[0]
 	}
-
-	for _, plan.source = range stores {
-		retryLimit := s.retryQuota.GetLimit(plan.source)
-		for i := 0; i < retryLimit; i++ {
-			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
-			// Priority pick the region that has a pending peer.
-			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthyAllowPending, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
-			if plan.region == nil {
-				// Then pick the region that has a follower in the source store.
-				plan.region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
-			}
-			if plan.region == nil {
-				// Then pick the region has the leader in the source store.
-				plan.region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
-			}
-			if plan.region == nil {
-				// Finally pick learner.
-				plan.region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
-			}
-			if plan.region == nil {
-				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-				continue
-			}
-			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-
-			// Skip hot regions.
-			if cluster.IsRegionHot(plan.region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
-				continue
-			}
-			// Check region whether have leader
-			if plan.region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-				continue
-			}
-
-			if op := s.transferPeer(plan); op != nil {
-				s.retryQuota.ResetLimit(plan.source)
-				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-				return []*operator.Operator{op}
-			}
-		}
-		s.retryQuota.Attenuate(plan.source)
-	}
-	s.retryQuota.GC(stores)
 	return nil
 }
 
-// transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
+func (s *balanceRegionScheduler) PickTargetStore(cluster schedule.Cluster, plan *balancePlan) *core.StoreInfo {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIds()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
@@ -227,38 +183,81 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		FilterTarget(plan.GetOpts(), filters...).
 		Sort(filter.RegionScoreComparer(plan.GetOpts()))
 
-	for _, plan.target = range candidates.Stores {
-		regionID := plan.region.GetID()
-		sourceID := plan.source.GetID()
-		targetID := plan.target.GetID()
-		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+	if len(candidates.Stores) != 0 {
+		return candidates.Stores[0]
+	}
+	return nil
+}
 
-		if !plan.shouldBalance(s.GetName()) {
-			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-			continue
-		}
+func (s *balanceRegionScheduler) PickRegion(cluster schedule.Cluster, plan *balancePlan) *core.RegionInfo {
+	var allowBalanceEmptyRegion func(*core.RegionInfo) bool
 
-		oldPeer := plan.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
-		if err != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-			return nil
-		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
-		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
-			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
-		)
-		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(plan.sourceScore, 'f', 2, 64)
-		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(plan.targetScore, 'f', 2, 64)
-		return op
+	switch cluster.(type) {
+	case *schedule.RangeCluster:
+		// allow empty region to be scheduled in range cluster
+		allowBalanceEmptyRegion = func(region *core.RegionInfo) bool { return true }
+	default:
+		allowBalanceEmptyRegion = isAllowBalanceEmptyRegion(cluster)
+	}
+	// Priority pick the region that has a pending peer.
+	// Pending region may means the disk is overload, remove the pending region firstly.
+	region := cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthyAllowPending, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+	if region == nil {
+		// Then pick the region that has a follower in the source store.
+		region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+	}
+	if region == nil {
+		// Then pick the region has the leader in the source store.
+		region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+	}
+	if region == nil {
+		// Finally pick learner.
+		region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+	}
+	if region == nil {
+		return nil
 	}
 
-	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
-	return nil
+	log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+
+	// Skip hot regions.
+	if cluster.IsRegionHot(plan.region) {
+		log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+	}
+	// Check region whether have leader
+	if region.GetLeader() == nil {
+		log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+	}
+	return region
+}
+
+func (s *balanceRegionScheduler) ExecutePlan(plan *balancePlan) *operator.Operator {
+	regionID := plan.region.GetID()
+	sourceID := plan.source.GetID()
+	targetID := plan.target.GetID()
+	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+
+	if !plan.shouldBalance(s.GetName()) {
+		return nil
+	}
+
+	oldPeer := plan.region.GetStorePeer(sourceID)
+	newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
+	op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
+		return nil
+	}
+	sourceLabel := strconv.FormatUint(sourceID, 10)
+	targetLabel := strconv.FormatUint(targetID, 10)
+	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+		s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
+		s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
+	)
+	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(plan.sourceScore, 'f', 2, 64)
+	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(plan.targetScore, 'f', 2, 64)
+	return op
 }
 
 // isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
