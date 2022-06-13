@@ -102,7 +102,7 @@ func (p *solver) shouldBalance(scheduleName string, plan *schedulePlan) bool {
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := p.sourceScore > p.targetScore
 
-	if !shouldBalance {
+	if plan.region != nil && !shouldBalance {
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", plan.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", plan.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
@@ -119,9 +119,9 @@ func (p *solver) getTolerantResource(region *core.RegionInfo) int64 {
 	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
 		return int64(p.tolerantSizeRatio)
 	}
-	regionSize := region.GetApproximateSize()
-	if regionSize < p.GetAverageRegionSize() {
-		regionSize = p.GetAverageRegionSize()
+	var regionSize = p.GetAverageRegionSize()
+	if region != nil && regionSize > p.GetAverageRegionSize() {
+		regionSize = region.GetApproximateSize()
 	}
 	return int64(float64(regionSize) * p.tolerantSizeRatio)
 }

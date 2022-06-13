@@ -793,6 +793,20 @@ func (c *coordinator) isSchedulerExisted(name string) (bool, error) {
 	return true, nil
 }
 
+func (c *coordinator) getSchedulerState(name string) (string, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return "", errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return "", errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+
+	return sc.GetState(c.cluster), nil
+}
+
 func (c *coordinator) runScheduler(s *scheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()

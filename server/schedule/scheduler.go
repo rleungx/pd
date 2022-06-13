@@ -42,6 +42,7 @@ type Scheduler interface {
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) []*operator.Operator
 	IsScheduleAllowed(cluster Cluster) bool
+	GetState(cluster Cluster) string
 }
 
 // EncodeConfig encode the custom config for each scheduler.

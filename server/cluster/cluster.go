@@ -563,6 +563,11 @@ func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
 	return c.coordinator.isSchedulerExisted(name)
 }
 
+// GetSchedulerState returns the state of a scheduler.
+func (c *RaftCluster) GetSchedulerState(name string) (string, error) {
+	return c.coordinator.getSchedulerState(name)
+}
+
 // PauseOrResumeChecker pauses or resumes checker.
 func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
 	return c.coordinator.pauseOrResumeChecker(name, t)

@@ -278,3 +278,27 @@ func isEmptyRegionAllowBalance(cluster schedule.Cluster, region *core.RegionInfo
 func isAllowBalanceEmptyRegion(cluster schedule.Cluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return isEmptyRegionAllowBalance(cluster, region) }
 }
+
+func (s *balanceRegionScheduler) GetState(cluster schedule.Cluster) string {
+	state := "stable"
+	sources := s.solver.GetStores()
+	for _, source := range sources {
+		plan := newSchedulePlan()
+		plan.source = source
+		filters := []filter.Filter{
+			filter.NewPlacementSafeguard(s.GetName(), s.solver.GetOpts(), s.solver.GetBasicCluster(), s.solver.GetRuleManager(), plan.region, plan.source),
+			filter.NewRegionScoreFilter(s.GetName(), plan.source, s.solver.GetOpts()),
+			filter.NewSpecialUseFilter(s.GetName()),
+		}
+
+		targets := filter.NewCandidates(s.solver.GetStores()).
+			FilterTarget(s.solver.GetOpts(), filters...).Stores
+		for _, target := range targets {
+			plan.target = target
+			if s.solver.shouldBalance(s.GetName(), plan) {
+				state = "not-stable"
+			}
+		}
+	}
+	return state
+}

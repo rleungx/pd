@@ -293,6 +293,16 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 	return err
 }
 
+// GetSchedulerState returns the state of a scheduler.
+func (h *Handler) GetSchedulerState(name string) (string, error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return "", err
+	}
+
+	return c.GetSchedulerState(name)
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)

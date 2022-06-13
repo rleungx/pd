@@ -91,3 +91,6 @@ func (s *BaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
 // Cleanup does some cleanup work
 func (s *BaseScheduler) Cleanup(cluster schedule.Cluster) {}
+
+// GetState returns the state of the scheduler.
+func (s *BaseScheduler) GetState(cluster schedule.Cluster) string { return "" }

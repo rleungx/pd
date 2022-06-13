@@ -345,6 +345,22 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
 }
 
+// @Router /schedulers/{name}/state [post]
+func (h *schedulerHandler) GetSchedulerState(w http.ResponseWriter, r *http.Request) {
+	var input map[string]int64
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
+		return
+	}
+
+	name := mux.Vars(r)["name"]
+	state, err := h.Handler.GetSchedulerState(name)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, state)
+}
+
 type schedulerConfigHandler struct {
 	svr *server.Server
 	rd  *render.Render
