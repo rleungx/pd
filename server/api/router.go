@@ -330,6 +330,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
 	registerFunc(apiRouter, "/min-resolved-ts", minResolvedTSHandler.GetMinResolvedTS, setMethods("GET"))
 
+	// diagnosis API
+	diagnosisHandler := newDiagnosisHandler(svr, rd)
+	registerFunc(clusterRouter, "/diagnose/scheduler", diagnosisHandler.GetSchedulerState, setMethods("GET"))
+
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores",

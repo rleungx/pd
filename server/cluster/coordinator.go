@@ -958,3 +958,22 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 	}
 	return s.GetDelayUntil(), nil
 }
+
+func (c *coordinator) getSchedulerState(name string) (string, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return "", errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return "", errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	// TODO: get through the diagnosis controller's plan analysis result
+	cacheCluster := newCacheCluster(c.cluster)
+	op, _ := s.Scheduler.Schedule(cacheCluster, true)
+	if op != nil {
+		return "schedule", nil
+	}
+	return "unschedule", nil
+}

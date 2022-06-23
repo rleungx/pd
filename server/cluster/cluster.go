@@ -2367,3 +2367,7 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.getPausedSchedulerDelayUntil(name)
 }
+
+func (c *RaftCluster) GetSchedulerState(name string) (string, error) {
+	return c.coordinator.getSchedulerState(name)
+}
