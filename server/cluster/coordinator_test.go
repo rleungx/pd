@@ -1026,7 +1026,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		c.Assert(ops, HasLen, 1)
 		op1 := ops[0]
 		c.Assert(op1, NotNil)
@@ -1035,7 +1035,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	}
 	for {
 		time.Sleep(time.Millisecond * 10)
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		if time.Since(start) > time.Second {
 			break
 		}
@@ -1048,7 +1048,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		c.Assert(ops, HasLen, 1)
 		op := ops[0]
 		c.Assert(oc.AddOperator(op), IsTrue)
@@ -1057,7 +1057,8 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
-		c.Assert(len(lb.Schedule(tc)), Greater, 0)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		c.Assert(len(ops), Greater, 0)
 	}
 }
 
@@ -1085,10 +1086,12 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(oc.AddOperator(op2), IsTrue)
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
-	c.Assert(lb.Schedule(tc), HasLen, 0)
+	ops, _ := lb.Schedule(tc, false /* dryRun */)
+	c.Assert(ops, HasLen, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(len(lb.Schedule(tc)), Greater, 0)
+	ops, _ = lb.Schedule(tc, false /* dryRun */)
+	c.Assert(len(ops), Greater, 0)
 }
 
 func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
