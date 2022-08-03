@@ -14,8 +14,6 @@
 
 package plan
 
-import "fmt"
-
 // StatusCode is used to classify the plan result.
 type StatusCode int
 
@@ -124,5 +122,5 @@ func (s Status) IsOK() bool {
 }
 
 func (s Status) String() string {
-	return fmt.Sprintf("%s, %s", StatusText(s.StatusCode), s.DetailedReason)
+	return StatusText(s.StatusCode)
 }

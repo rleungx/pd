@@ -329,6 +329,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/debug/pprof/threadcreate", pprofHandler.PProfThreadcreate)
 	registerFunc(apiRouter, "/debug/pprof/zip", pprofHandler.PProfZip)
 
+	diagHandler := newDiagHandler(svr, rd)
+	registerFunc(clusterRouter, "/debug/diagnosis", diagHandler.GetStatus)
+
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	registerFunc(apiRouter, "/gc/safepoint", serviceGCSafepointHandler.GetGCSafePoint, setMethods(http.MethodGet), setAuditBackend(localLog))

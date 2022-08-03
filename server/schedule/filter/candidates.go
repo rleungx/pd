@@ -45,6 +45,12 @@ func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Fi
 	return c
 }
 
+// FilterTarget keeps stores that can pass all target filters.
+func (c *StoreCandidates) FilterTargetWithCounter(opt *config.PersistOptions, counter map[string]map[string]uint64, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectTargetStoresWithCounter(c.Stores, counter, filters, opt)
+	return c
+}
+
 // Sort sorts store list by given comparer in ascending order.
 func (c *StoreCandidates) Sort(less StoreComparer) *StoreCandidates {
 	sort.Slice(c.Stores, func(i, j int) bool { return less(c.Stores[i], c.Stores[j]) < 0 })

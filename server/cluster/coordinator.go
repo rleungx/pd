@@ -17,6 +17,7 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -1020,4 +1022,37 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
+}
+
+func (c *coordinator) GetStatus() (string, string, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return "", "", errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers["balance-region-scheduler"]
+	if !ok {
+		return "", "", errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	op, statistics := s.Scheduler.(*schedulers.BalanceRegionScheduler).ScheduleStatistics(newCacheCluster(s.cluster), false)
+	if op == nil {
+		res := make(map[string]uint64)
+		for _, status := range statistics {
+			max := uint64(0)
+			str := ""
+			for stat, c := range status {
+				if c >= max {
+					max = c
+					str = stat
+				}
+			}
+			res[str] += 1
+		}
+		var resstr string
+		for k, v := range res {
+			resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k)
+		}
+		return "pending", resstr, nil
+	}
+	return "scheduling", "", nil
 }
