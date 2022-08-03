@@ -1041,7 +1041,7 @@ func (c *coordinator) GetStatus() (string, string, error) {
 			max := uint64(0)
 			curstat := plan.NewStatus(plan.StatusOK)
 			for stat, c := range status {
-				if c > max {
+				if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) {
 					max = c
 					curstat = stat
 				}
@@ -1050,9 +1050,7 @@ func (c *coordinator) GetStatus() (string, string, error) {
 		}
 		var resstr string
 		for k, v := range res {
-			if k.StatusCode != plan.StatusStoreExcluded {
-				resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
-			}
+			resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
 		}
 		return "pending", resstr, nil
 	}

@@ -120,7 +120,7 @@ func (s Status) IsOK() bool {
 
 // IsOK returns true if the status code is StatusOK.
 func (s Status) Priority() int {
-	return int(s.StatusCode)
+	return int(s.StatusCode) / 7
 }
 
 func (s Status) String() string {
