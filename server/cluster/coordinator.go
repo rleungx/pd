@@ -1041,7 +1041,7 @@ func (c *coordinator) GetStatus() (string, string, error) {
 			max := uint64(0)
 			curstat := plan.NewStatus(plan.StatusOK)
 			for stat, c := range status {
-				if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) {
+				if c > max {
 					max = c
 					curstat = stat
 				}
