@@ -267,8 +267,8 @@ func (s *BalanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 	return nil
 }
 
-func (s *BalanceRegionScheduler) ScheduleStatistics(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, map[string]map[string]uint64) {
-	counter := make(map[string]map[string]uint64)
+func (s *BalanceRegionScheduler) ScheduleStatistics(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, map[string]map[plan.Status]uint64) {
+	counter := make(map[string]map[plan.Status]uint64)
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
 	stores = filter.SelectSourceStoresWithCounter(stores, s.filters, opts, counter)
@@ -345,7 +345,7 @@ func (s *BalanceRegionScheduler) ScheduleStatistics(cluster schedule.Cluster, dr
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *BalanceRegionScheduler) transferPeer1(plan *balancePlan, counter map[string]map[string]uint64) *operator.Operator {
+func (s *BalanceRegionScheduler) transferPeer1(plan *balancePlan, counter map[string]map[plan.Status]uint64) *operator.Operator {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIDs()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),

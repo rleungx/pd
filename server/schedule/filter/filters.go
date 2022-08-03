@@ -47,15 +47,15 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectSourceStoresWithCounter selects stores that be selected as source store from the list.
-func SelectSourceStoresWithCounter(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, counter map[string]map[string]uint64) []*core.StoreInfo {
+func SelectSourceStoresWithCounter(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, counter map[string]map[plan.Status]uint64) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			if !filters[i].Source(opt, s).IsOK() {
 				sourceID := strconv.FormatUint(s.GetID(), 10)
 				if _, ok := counter[sourceID]; !ok {
-					counter[sourceID] = make(map[string]uint64)
+					counter[sourceID] = make(map[plan.Status]uint64)
 				}
-				status := filters[i].Source(opt, s).String()
+				status := filters[i].Source(opt, s)
 				counter[sourceID][status] += 1
 				return false
 			}
@@ -86,16 +86,16 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.
-func SelectTargetStoresWithCounter(stores []*core.StoreInfo, counter map[string]map[string]uint64, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
+func SelectTargetStoresWithCounter(stores []*core.StoreInfo, counter map[string]map[plan.Status]uint64, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
 			if !filter.Target(opt, s).IsOK() {
 				targetID := strconv.FormatUint(s.GetID(), 10)
 				if _, ok := counter[targetID]; !ok {
-					counter[targetID] = make(map[string]uint64)
+					counter[targetID] = make(map[plan.Status]uint64)
 				}
-				status := filters[i].Target(opt, s).String()
+				status := filters[i].Target(opt, s)
 				counter[targetID][status] += 1
 				return false
 			}

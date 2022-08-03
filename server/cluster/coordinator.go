@@ -1036,21 +1036,21 @@ func (c *coordinator) GetStatus() (string, string, error) {
 	}
 	op, statistics := s.Scheduler.(*schedulers.BalanceRegionScheduler).ScheduleStatistics(newCacheCluster(s.cluster), false)
 	if op == nil {
-		res := make(map[string]uint64)
+		res := make(map[plan.Status]uint64)
 		for _, status := range statistics {
 			max := uint64(0)
-			str := ""
+			curstat := plan.NewStatus(plan.StatusOK)
 			for stat, c := range status {
-				if c >= max {
+				if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) {
 					max = c
-					str = stat
+					curstat = stat
 				}
 			}
-			res[str] += 1
+			res[curstat] += 1
 		}
 		var resstr string
 		for k, v := range res {
-			resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k)
+			resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
 		}
 		return "pending", resstr, nil
 	}

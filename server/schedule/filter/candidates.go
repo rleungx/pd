@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/plan"
 )
 
 // StoreCandidates wraps store list and provide utilities to select source or
@@ -46,7 +47,7 @@ func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Fi
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTargetWithCounter(opt *config.PersistOptions, counter map[string]map[string]uint64, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterTargetWithCounter(opt *config.PersistOptions, counter map[string]map[plan.Status]uint64, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStoresWithCounter(c.Stores, counter, filters, opt)
 	return c
 }

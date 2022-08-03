@@ -20,23 +20,12 @@ type StatusCode int
 const (
 	// StatusOK represents the plan can be scheduled successfully.
 	StatusOK StatusCode = iota
-	// StatusNoNeed represents the plan is no need to be scheduled.
-	StatusNoNeed
 	// StatusPaused represents the scheduler or checker is paused.
 	StatusPaused
-
-	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
-	StatusStoreThrottled
-	// StatusStoreUnavailable represents the store cannot be selected due to it's state.
-	StatusStoreUnavailable
-	// StatusStoreLowSpace represents the store cannot be selected because it runs out of space.
-	StatusStoreLowSpace
-	// StatusStoreDraining represents the data on the store is moving out.
-	StatusStoreDraining
-	// StatusStoreBlocked represents the store is restricted by the special configuration.
-	StatusStoreBlocked
 	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
 	StatusStoreExcluded
+	// StatusNoNeed represents the plan is no need to be scheduled.
+	StatusNoNeed
 
 	// StatusRegionHot represents the region cannot be selected due to the heavy load.
 	StatusRegionHot
@@ -47,21 +36,29 @@ const (
 	// StatusRegionNotReplicated represents the region does not have enough replicas.
 	StatusRegionNotReplicated
 
+	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
+	StatusIsolationNotMatch
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
 	StatusLabelNotMatch
 	// StatusRuleNotMatch represents the placement rule cannot satisfy the requirement.
 	StatusRuleNotMatch
-	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
-	StatusIsolationNotMatch
 
-	// TODO: The below status is not used for now. Once it is used, Please remove this comment.
-
-	// StatusStoreNotExisted represents the store cannot be found in PD.
-	StatusStoreNotExisted
 	// StatusNoTargetRegion represents the target region of merge operation cannot be found.
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
 	StatusRegionLabelReject
+	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
+	StatusStoreThrottled
+	// StatusStoreDraining represents the data on the store is moving out.
+	StatusStoreDraining
+	// StatusStoreBlocked represents the store is restricted by the special configuration.
+	StatusStoreBlocked
+	// StatusStoreLowSpace represents the store cannot be selected because it runs out of space.
+	StatusStoreLowSpace
+	// StatusStoreUnavailable represents the store cannot be selected due to it's state.
+	StatusStoreUnavailable
+	// StatusStoreNotExisted represents the store cannot be found in PD.
+	StatusStoreNotExisted
 )
 
 var statusText = map[StatusCode]string{
@@ -119,6 +116,11 @@ func NewStatus(statusCode StatusCode, reason ...string) Status {
 // IsOK returns true if the status code is StatusOK.
 func (s Status) IsOK() bool {
 	return s.StatusCode == StatusOK
+}
+
+// IsOK returns true if the status code is StatusOK.
+func (s Status) Priority() int {
+	return int(s.StatusCode)
 }
 
 func (s Status) String() string {
