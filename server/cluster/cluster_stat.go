@@ -249,7 +249,7 @@ func (cs *State) State(excludes ...uint64) LoadState {
 	// The CPU usage in fact is collected from grpc-server, so it is not the
 	// CPU usage for the whole TiKV process. The boundaries are empirical
 	// values.
-	// TODO we may get a more accurate state with the information of the number // of the CPU cores
+	// TODO we may get a more accurate state with the information of the number of the CPU cores
 	cpu := cs.cst.CPU(excludes...)
 	log.Debug("calculated cpu", zap.Float64("usage", cpu))
 	clusterStateCPUGauge.Set(cpu)
