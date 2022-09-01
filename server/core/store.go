@@ -203,7 +203,7 @@ func (s *StoreInfo) IsSlow() bool {
 func (s *StoreInfo) IsIdle() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rawStats.GetLoadScore() >= idleStoreThreshold
+	return s.rawStats.GetLoadScore() <= idleStoreThreshold
 }
 
 // IsPhysicallyDestroyed checks if the store's physically destroyed.
