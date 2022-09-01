@@ -230,7 +230,7 @@ func (c *RaftCluster) InitCluster(
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
-	c.loadScoreRecorder = cache.NewFIFO(6)
+	c.loadScoreRecorder = cache.NewFIFO(30)
 }
 
 // Start starts a cluster.
@@ -1514,9 +1514,11 @@ func (c *RaftCluster) checkStores() {
 			removingStores = append(removingStores, removingStore)
 		}
 	}
-	c.loadScoreRecorder.Put(uint64(time.Now().Unix()), isClusterBusy)
-	if c.loadScoreRecorder.Len() >= 6 {
-		c.switchMode(preparingStores, removingStores)
+	if len(removingStores) != 0 || len(preparingStores) != 0 {
+		c.loadScoreRecorder.Put(uint64(time.Now().Unix()), isClusterBusy)
+		if c.loadScoreRecorder.Len() >= 30 {
+			c.switchMode(preparingStores, removingStores)
+		}
 	}
 
 	if len(removingStores) == 0 {
