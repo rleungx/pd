@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -140,6 +141,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
+	loadScoreRecorder        *cache.FIFO
 }
 
 // Status saves some state information.
@@ -228,6 +230,7 @@ func (c *RaftCluster) InitCluster(
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
+	c.loadScoreRecorder = cache.NewFIFO(6)
 }
 
 // Start starts a cluster.
@@ -1444,8 +1447,9 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) checkStores() {
-	var offlineStores []*metapb.Store
+	var removingStores, preparingStores []*metapb.Store
 	var upStoreCount int
+	var isClusterBusy bool
 	stores := c.GetStores()
 
 	for _, store := range stores {
@@ -1454,8 +1458,12 @@ func (c *RaftCluster) checkStores() {
 			continue
 		}
 
+		if !store.IsIdle() {
+			isClusterBusy = true
+		}
 		storeID := store.GetID()
 		if store.IsPreparing() {
+			preparingStores = append(preparingStores, store.GetMeta())
 			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetRegionCount() < core.InitClusterRegionThreshold {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
@@ -1488,8 +1496,8 @@ func (c *RaftCluster) checkStores() {
 			continue
 		}
 
-		offlineStore := store.GetMeta()
-		id := offlineStore.GetId()
+		removingStore := store.GetMeta()
+		id := removingStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
 		if c.IsPrepared() {
 			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
@@ -1499,23 +1507,62 @@ func (c *RaftCluster) checkStores() {
 		if regionCount == 0 {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
-					zap.Stringer("store", offlineStore),
+					zap.Stringer("store", removingStore),
 					errs.ZapError(err))
 			}
 		} else {
-			offlineStores = append(offlineStores, offlineStore)
+			removingStores = append(removingStores, removingStore)
 		}
 	}
+	c.loadScoreRecorder.Put(uint64(time.Now().Unix()), isClusterBusy)
+	if c.loadScoreRecorder.Len() == 6 {
+		c.switchMode(preparingStores, removingStores)
+	}
 
-	if len(offlineStores) == 0 {
+	if len(removingStores) == 0 {
 		return
 	}
 
 	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
 	if !c.opt.IsPlacementRulesEnabled() && upStoreCount < c.opt.GetMaxReplicas() {
-		for _, offlineStore := range offlineStores {
-			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
+		for _, removingStore := range removingStores {
+			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", removingStore))
 		}
+	}
+}
+
+func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store) {
+	var isClusterBusy bool
+	for _, e := range c.loadScoreRecorder.Elems() {
+		if e.Value.(bool) {
+			isClusterBusy = true
+		}
+	}
+	var mode string
+	if !isClusterBusy && (len(preparingStores) != 0 || len(removingStores) != 0) {
+		mode = config.Scaling
+	} else {
+		mode = config.Normal
+	}
+	var newCfg config.ScheduleConfig
+	oldCfg := c.opt.GetScheduleConfig()
+	if mode != c.opt.GetMode() {
+		cfg, err := c.opt.SwitchMode(c.GetStorage(), oldCfg, mode)
+		if err != nil {
+			log.Error("failed to switch schedule mode", errs.ZapError(err))
+		}
+		newCfg = *cfg
+		log.Info("schedule mode is switched", zap.String("new-mode", newCfg.Mode))
+		newCfg.SchedulersPayload = nil
+		c.opt.SetScheduleConfig(&newCfg)
+		if err := c.opt.Persist(c.GetStorage()); err != nil {
+			c.opt.SetScheduleConfig(oldCfg)
+			log.Error("failed to update schedule config",
+				zap.Reflect("new", newCfg),
+				zap.Reflect("old", oldCfg),
+				errs.ZapError(err))
+		}
+		log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	}
 }
 
