@@ -32,7 +32,7 @@ const (
 	storePersistInterval = 5 * time.Minute
 	initialMinSpace      = 8 * units.GiB // 2^33=8GB
 	slowStoreThreshold   = 80
-	idleStoreThreshold   = 20
+	idleStoreThreshold   = 50
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
