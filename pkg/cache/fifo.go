@@ -96,3 +96,11 @@ func (c *FIFO) Len() int {
 
 	return c.ll.Len()
 }
+
+// Reset reset the cache.
+func (c *FIFO) Reset() {
+	c.Lock()
+	defer c.Unlock()
+
+	c.ll = list.New()
+}

@@ -1515,11 +1515,14 @@ func (c *RaftCluster) checkStores() {
 		}
 	}
 	c.loadScoreRecorder.Put(uint64(time.Now().Unix()), isClusterBusy)
-	if c.loadScoreRecorder.Len() == 6 {
+	if c.loadScoreRecorder.Len() >= 6 {
 		c.switchMode(preparingStores, removingStores)
 	}
 
 	if len(removingStores) == 0 {
+		if len(preparingStores) == 0 && c.loadScoreRecorder.Len() != 0 {
+			c.loadScoreRecorder.Reset()
+		}
 		return
 	}
 
