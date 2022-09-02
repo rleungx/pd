@@ -1523,6 +1523,7 @@ func (c *RaftCluster) checkStores() {
 
 	if len(removingStores) == 0 {
 		if len(preparingStores) == 0 && c.loadScoreRecorder.Len() != 0 {
+			c.switchMode(preparingStores, removingStores)
 			c.loadScoreRecorder.Reset()
 		}
 		return
