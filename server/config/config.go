@@ -111,6 +111,8 @@ type Config struct {
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
+	ScheduleMode ScheduleModeConfig `toml:"schedule-mode" json:"schedule-mode"`
+
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
 	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
@@ -582,6 +584,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
+	if err := c.ScheduleMode.adjust(configMetaData.Child("mode")); err != nil {
+		return err
+	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	adjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
@@ -763,9 +768,6 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
-
-	// Mode is a state of scheduling. Different mode have different strategies in configuration.
-	Mode string `toml:"mode" json:"mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -815,6 +817,7 @@ const (
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
 	defaultMode                  = Normal
+	defaultEnableAutoTune        = false
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -874,9 +877,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
-	}
-	if !meta.IsDefined("mode") {
-		adjustString(&c.Mode, defaultMode)
 	}
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
@@ -973,9 +973,6 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
 		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
-	}
-	if !isValidMode(c.Mode) {
-		return errors.Errorf("mode %v is invalid", c.Mode)
 	}
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
@@ -1249,6 +1246,38 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 		m[k] = sl2
 	}
 	return m
+}
+
+// ScheduleModeConfig is used to control the mode of scheduling.
+type ScheduleModeConfig struct {
+	// Mode is a state of scheduling. Different mode have different strategies in configuration.
+	Mode string `toml:"mode" json:"mode"`
+	// EnableAutoTune decide if we let the mode self tuning.
+	EnableAutoTune bool `toml:"enable-auto-tune" json:"enable-auto-tune,string"`
+}
+
+func (c *ScheduleModeConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("mode") {
+		c.Mode = defaultMode
+	}
+	if !meta.IsDefined("enable-auto-tune") {
+		c.EnableAutoTune = defaultEnableAutoTune
+	}
+	return c.Validate()
+}
+
+// Validate is used to validate if some mode configurations are right.
+func (c *ScheduleModeConfig) Validate() error {
+	if !isValidMode(c.Mode) {
+		return errors.Errorf("mode %v is invalid", c.Mode)
+	}
+	return nil
+}
+
+// Clone returns a copy of mode config.
+func (c *ScheduleModeConfig) Clone() *ScheduleModeConfig {
+	cfg := *c
+	return &cfg
 }
 
 // SetupLogger setup the logger.
