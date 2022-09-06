@@ -1566,8 +1566,6 @@ func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store
 		}
 		log.Info("schedule mode is switched", zap.Reflect("old-mode", *oldCfg), zap.Reflect("new-mode", newCfg))
 	}
-
-	return
 }
 
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
