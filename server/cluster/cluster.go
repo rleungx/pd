@@ -1538,6 +1538,10 @@ func (c *RaftCluster) checkStores() {
 }
 
 func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store) {
+	oldCfg := c.opt.GetScheduleModeConfig()
+	if !oldCfg.AutoTune {
+		return
+	}
 	var isClusterBusy bool
 	for _, e := range c.loadScoreRecorder.Elems() {
 		if e.Value.(bool) {
@@ -1550,26 +1554,20 @@ func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store
 	} else {
 		mode = config.Normal
 	}
-	var newCfg config.ScheduleConfig
-	oldCfg := c.opt.GetScheduleConfig()
-	if mode != c.opt.GetMode() {
-		cfg, err := c.opt.SwitchMode(c.GetStorage(), oldCfg, mode)
+
+	if mode != oldCfg.Mode {
+		newCfg := &config.ScheduleModeConfig{Mode: mode, AutoTune: oldCfg.AutoTune}
+		c.opt.SetScheduleModeConfig(newCfg)
+		err := c.opt.SwitchMode(c.GetStorage(), c.opt.GetMode(), mode)
 		if err != nil {
-			log.Error("failed to switch schedule mode", errs.ZapError(err))
+			c.opt.SetScheduleModeConfig(oldCfg)
+			log.Warn("cannot switch mode", zap.Reflect("old-mode", oldCfg), zap.Reflect("new-mode", newCfg))
+			return
 		}
-		newCfg = *cfg
-		log.Info("schedule mode is switched", zap.String("new-mode", newCfg.Mode))
-		newCfg.SchedulersPayload = nil
-		c.opt.SetScheduleConfig(&newCfg)
-		if err := c.opt.Persist(c.GetStorage()); err != nil {
-			c.opt.SetScheduleConfig(oldCfg)
-			log.Error("failed to update schedule config",
-				zap.Reflect("new", newCfg),
-				zap.Reflect("old", oldCfg),
-				errs.ZapError(err))
-		}
-		log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
+		log.Info("schedule mode is switched", zap.Reflect("old-mode", *oldCfg), zap.Reflect("new-mode", newCfg))
 	}
+
+	return
 }
 
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
