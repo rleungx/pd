@@ -1539,7 +1539,7 @@ func (c *RaftCluster) checkStores() {
 
 func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store) {
 	oldCfg := c.opt.GetScheduleModeConfig()
-	if !oldCfg.AutoTune {
+	if !oldCfg.EnableAutoTune {
 		return
 	}
 	var isClusterBusy bool
@@ -1549,22 +1549,20 @@ func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store
 		}
 	}
 	var mode string
+	newCfg := &config.ScheduleModeConfig{Mode: mode, EnableAutoTune: oldCfg.EnableAutoTune}
 	if !isClusterBusy && (len(preparingStores) != 0 || len(removingStores) != 0) {
-		mode = config.Scaling
+		newCfg.Mode = config.Scaling
 	} else {
-		mode = config.Normal
+		newCfg.Mode = config.Normal
 	}
 
-	if mode != oldCfg.Mode {
-		newCfg := &config.ScheduleModeConfig{Mode: mode, AutoTune: oldCfg.AutoTune}
-		c.opt.SetScheduleModeConfig(newCfg)
-		err := c.opt.SwitchMode(c.GetStorage(), c.opt.GetMode(), mode)
+	if newCfg.Mode != oldCfg.Mode {
+		err := c.opt.SwitchMode(c.GetStorage(), oldCfg, newCfg)
 		if err != nil {
-			c.opt.SetScheduleModeConfig(oldCfg)
 			log.Warn("cannot switch mode", zap.Reflect("old-mode", oldCfg), zap.Reflect("new-mode", newCfg))
 			return
 		}
-		log.Info("schedule mode is switched", zap.Reflect("old-mode", *oldCfg), zap.Reflect("new-mode", newCfg))
+		log.Info("schedule mode is switched", zap.Reflect("old-mode", oldCfg), zap.Reflect("new-mode", newCfg))
 	}
 }
 
