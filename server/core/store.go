@@ -32,7 +32,7 @@ const (
 	storePersistInterval = 5 * time.Minute
 	initialMinSpace      = 8 * units.GiB // 2^33=8GB
 	slowStoreThreshold   = 80
-	idleStoreThreshold   = 60
+	idleStoreThreshold   = 40
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -199,11 +199,11 @@ func (s *StoreInfo) IsSlow() bool {
 	return s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
-// IsIdle checks if the load score reaches the threshold.
-func (s *StoreInfo) IsIdle() bool {
+// GetLoadScore checks if the load score reaches the threshold.
+func (s *StoreInfo) GetLoadScore() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rawStats.GetLoadScore() <= idleStoreThreshold
+	return s.rawStats.GetLoadScore()
 }
 
 // IsPhysicallyDestroyed checks if the store's physically destroyed.

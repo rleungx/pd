@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -141,7 +140,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
-	loadScoreRecorder        *cache.FIFO
+	clusterState             *ClusterState
 }
 
 // Status saves some state information.
@@ -230,7 +229,7 @@ func (c *RaftCluster) InitCluster(
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
-	c.loadScoreRecorder = cache.NewFIFO(30)
+	c.clusterState = NewClusterState()
 }
 
 // Start starts a cluster.
@@ -1449,17 +1448,14 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 func (c *RaftCluster) checkStores() {
 	var removingStores, preparingStores []*metapb.Store
 	var upStoreCount int
-	var isClusterBusy bool
+	var removedStores []uint64
 	stores := c.GetStores()
 
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
+			removedStores = append(removedStores, store.GetID())
 			continue
-		}
-
-		if !store.IsIdle() {
-			isClusterBusy = true
 		}
 		storeID := store.GetID()
 		if store.IsPreparing() {
@@ -1515,16 +1511,20 @@ func (c *RaftCluster) checkStores() {
 		}
 	}
 	if len(removingStores) != 0 || len(preparingStores) != 0 {
-		c.loadScoreRecorder.Put(uint64(time.Now().Unix()), isClusterBusy)
-		if c.loadScoreRecorder.Len() >= 30 {
-			c.switchMode(preparingStores, removingStores)
+		c.clusterState.Collect(stores)
+		switch c.clusterState.GetState(removedStores...) {
+		case LoadStateLow:
+			c.switchMode(config.Scaling)
+		case LoadStateHigh:
+			c.switchMode(config.Normal)
+		default:
 		}
 	}
 
 	if len(removingStores) == 0 {
-		if len(preparingStores) == 0 && c.loadScoreRecorder.Len() != 0 {
-			c.switchMode(preparingStores, removingStores)
-			c.loadScoreRecorder.Reset()
+		if len(preparingStores) == 0 && !c.clusterState.IsEmpty() {
+			c.switchMode(config.Normal)
+			c.clusterState.Reset()
 		}
 		return
 	}
@@ -1537,25 +1537,12 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) switchMode(preparingStores, removingStores []*metapb.Store) {
+func (c *RaftCluster) switchMode(mode string) {
 	oldCfg := c.opt.GetScheduleModeConfig()
 	if !oldCfg.EnableAutoTune {
 		return
 	}
-	var isClusterBusy bool
-	for _, e := range c.loadScoreRecorder.Elems() {
-		if e.Value.(bool) {
-			isClusterBusy = true
-		}
-	}
-	var mode string
 	newCfg := &config.ScheduleModeConfig{Mode: mode, EnableAutoTune: oldCfg.EnableAutoTune}
-	if !isClusterBusy && (len(preparingStores) != 0 || len(removingStores) != 0) {
-		newCfg.Mode = config.Scaling
-	} else {
-		newCfg.Mode = config.Normal
-	}
-
 	if newCfg.Mode != oldCfg.Mode {
 		err := c.opt.SwitchMode(c.GetStorage(), oldCfg, newCfg)
 		if err != nil {
