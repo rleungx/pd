@@ -750,15 +750,6 @@ type ScheduleConfig struct {
 	// Only used to display
 	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
 
-	// StoreLimitMode can be auto or manual, when set to auto,
-	// PD tries to change the store limit values according to
-	// the load state of the cluster dynamically. User can
-	// overwrite the auto-tuned value by pd-ctl, when the value
-	// is overwritten, the value is fixed until it is deleted.
-	// Default: manual
-	// WARN: StoreLimitMode is deprecated.
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
-
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
@@ -809,7 +800,6 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
@@ -861,9 +851,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("leader-schedule-policy") {
 		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
-	}
-	if !meta.IsDefined("store-limit-mode") {
-		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus

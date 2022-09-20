@@ -928,18 +928,6 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) er
 	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
 }
 
-// SetStoreLimitScene sets the limit values for different scenes
-func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
-	cluster := h.s.GetRaftCluster()
-	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
-}
-
-// GetStoreLimitScene returns the limit values for different scenes
-func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
-	cluster := h.s.GetRaftCluster()
-	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
-}
-
 // GetProgressByID returns the progress details for a given store ID.
 func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64, err error) {
 	return h.s.GetRaftCluster().GetProgressByID(storeID)

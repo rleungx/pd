@@ -149,15 +149,12 @@ func (se *StatEntries) LoadStatus(excludes ...uint64) float64 {
 	return max
 }
 
-// State collects information from store heartbeat
-// and calculates the load state of the cluster
+// ClusterState ...
 type ClusterState struct {
 	se *StatEntries
 }
 
-// NewState return the LoadState object which collects
-// information from store heartbeats and gives the current state of
-// the cluster
+// NewClusterState ...
 func NewClusterState() *ClusterState {
 	return &ClusterState{
 		se: NewStatEntries(NumberOfEntries),
@@ -176,9 +173,9 @@ func (s *ClusterState) GetState(excludes ...uint64) LoadState {
 	loadStatus := s.se.LoadStatus(excludes...)
 	log.Debug("calculated load", zap.Float64("load-status", loadStatus))
 	switch {
-	case loadStatus > 0 && loadStatus < 20:
+	case loadStatus > 0 && loadStatus < 30:
 		return LoadStateLow
-	case loadStatus >= 20 && loadStatus < 60:
+	case loadStatus >= 30 && loadStatus < 60:
 		return LoadStateNormal
 	case loadStatus >= 60:
 		return LoadStateHigh
@@ -191,12 +188,12 @@ func (s *ClusterState) Collect(stores []*core.StoreInfo) {
 	s.se.Append(stores)
 }
 
-// Reset statistics from store heartbeat
+// Reset ...
 func (s *ClusterState) Reset() {
 	s.se = NewStatEntries(NumberOfEntries)
 }
 
-// Reset statistics from store heartbeat
+// IsEmpty ...
 func (s *ClusterState) IsEmpty() bool {
 	return s.se.total == 0
 }

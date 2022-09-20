@@ -456,11 +456,6 @@ func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit
 }
 
-// GetStoreLimitMode returns the limit mode of store.
-func (o *PersistOptions) GetStoreLimitMode() string {
-	return o.GetScheduleConfig().StoreLimitMode
-}
-
 // GetMode returns the scheduling mode of PD.
 func (o *PersistOptions) GetMode() string {
 	return o.GetScheduleModeConfig().Mode

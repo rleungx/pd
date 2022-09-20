@@ -127,7 +127,6 @@ type RaftCluster struct {
 	id                       id.Allocator
 	core                     *core.BasicCluster // cached cluster info
 	opt                      *config.PersistOptions
-	limiter                  *StoreLimiter
 	coordinator              *coordinator
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
@@ -271,7 +270,6 @@ func (c *RaftCluster) Start(s Server) error {
 	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
-	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
 	c.wg.Add(8)
 	go c.runCoordinator()
@@ -696,11 +694,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-
-	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
-		c.limiter.Collect(newStore.GetStoreStats())
-	}
 
 	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
@@ -2071,11 +2064,6 @@ func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeI
 		AsLeader: asLeader,
 		AsPeer:   asPeer,
 	}
-}
-
-// GetStoreLimiter returns the dynamic adjusting limiter
-func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
-	return c.limiter
 }
 
 // GetStoreLimitByType returns the store limit for a given store ID and type.
