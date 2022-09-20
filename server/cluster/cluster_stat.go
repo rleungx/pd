@@ -96,7 +96,7 @@ const NumberOfEntries = 30
 
 // StatEntries saves the StatEntries for each store in the cluster
 type StatEntries struct {
-	stats map[uint64]*movingaverage.MedianFilter
+	stats map[uint64]*movingaverage.MaxFilter
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
 }
@@ -104,7 +104,7 @@ type StatEntries struct {
 // NewStatEntries returns a statistics object for the cluster
 func NewStatEntries(size int) *StatEntries {
 	return &StatEntries{
-		stats: make(map[uint64]*movingaverage.MedianFilter),
+		stats: make(map[uint64]*movingaverage.MaxFilter),
 		size:  size,
 	}
 }
@@ -121,7 +121,7 @@ func (se *StatEntries) Append(stores []*core.StoreInfo) {
 		// append the entry
 		entries, ok := se.stats[storeID]
 		if !ok {
-			entries = movingaverage.NewMedianFilter(se.size)
+			entries = movingaverage.NewMaxFilter(se.size)
 			se.stats[storeID] = entries
 		}
 
@@ -154,8 +154,7 @@ type ClusterState struct {
 	se *StatEntries
 }
 
-// NewClusterState ...
-func NewClusterState() *ClusterState {
+func newClusterState() *ClusterState {
 	return &ClusterState{
 		se: NewStatEntries(NumberOfEntries),
 	}
@@ -173,9 +172,9 @@ func (s *ClusterState) GetState(excludes ...uint64) LoadState {
 	loadStatus := s.se.LoadStatus(excludes...)
 	log.Debug("calculated load", zap.Float64("load-status", loadStatus))
 	switch {
-	case loadStatus > 0 && loadStatus < 30:
+	case loadStatus > 0 && loadStatus < 20:
 		return LoadStateLow
-	case loadStatus >= 30 && loadStatus < 60:
+	case loadStatus >= 20 && loadStatus < 60:
 		return LoadStateNormal
 	case loadStatus >= 60:
 		return LoadStateHigh

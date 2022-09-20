@@ -228,7 +228,7 @@ func (c *RaftCluster) InitCluster(
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
-	c.clusterState = NewClusterState()
+	c.clusterState = newClusterState()
 }
 
 // Start starts a cluster.
