@@ -172,7 +172,7 @@ func (s *ClusterState) GetState(excludes ...uint64) LoadState {
 	loadStatus := s.se.LoadStatus(excludes...)
 	log.Debug("calculated load", zap.Float64("load-status", loadStatus))
 	switch {
-	case loadStatus > 0 && loadStatus < 20:
+	case loadStatus > 0 && loadStatus < 30:
 		return LoadStateLow
 	case loadStatus >= 20 && loadStatus < 60:
 		return LoadStateNormal
