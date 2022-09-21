@@ -174,7 +174,7 @@ func (s *ClusterState) GetState(excludes ...uint64) LoadState {
 	switch {
 	case loadStatus > 0 && loadStatus < 30:
 		return LoadStateLow
-	case loadStatus >= 20 && loadStatus < 60:
+	case loadStatus >= 30 && loadStatus < 60:
 		return LoadStateNormal
 	case loadStatus >= 60:
 		return LoadStateHigh
