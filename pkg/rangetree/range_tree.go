@@ -32,14 +32,16 @@ type DebrisFactory func(startKey, EndKey []byte, item RangeItem) []RangeItem
 
 // RangeTree is the tree contains RangeItems.
 type RangeTree struct {
-	tree    *btree.BTree
+	tree    *btree.BTreeG[btree.Item]
 	factory DebrisFactory
 }
 
 // NewRangeTree is the constructor of the range tree.
 func NewRangeTree(degree int, factory DebrisFactory) *RangeTree {
 	return &RangeTree{
-		tree:    btree.New(degree),
+		tree: btree.NewG(degree, func(i, j btree.Item) bool {
+			return i.Less(j)
+		}),
 		factory: factory,
 	}
 }
@@ -74,11 +76,11 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 	if result == nil {
 		result = item
 	}
-
+	endKey := item.GetEndKey()
 	var overlaps []RangeItem
 	r.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
 		over := i.(RangeItem)
-		if len(item.GetEndKey()) > 0 && bytes.Compare(item.GetEndKey(), over.GetStartKey()) <= 0 {
+		if len(endKey) > 0 && bytes.Compare(endKey, over.GetStartKey()) <= 0 {
 			return false
 		}
 		overlaps = append(overlaps, over)
@@ -109,7 +111,7 @@ func contains(item RangeItem, key []byte) bool {
 
 // Remove removes the given item and return the deleted item.
 func (r *RangeTree) Remove(item RangeItem) RangeItem {
-	if r := r.tree.Delete(item); r != nil {
+	if r, _ := r.tree.Delete(item); r != nil {
 		return r.(RangeItem)
 	}
 	return nil
