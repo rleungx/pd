@@ -653,28 +653,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
 			}
-			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
-				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
-				saveKV, saveCache = true, true
-			}
-
-			if region.GetApproximateSize() != origin.GetApproximateSize() ||
-				region.GetApproximateKeys() != origin.GetApproximateKeys() {
-				saveCache = true
-			}
-			// Once flow has changed, will update the cache.
-			// Because keys and bytes are strongly related, only bytes are judged.
-			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
-				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
-				region.flowRoundDivisor < origin.flowRoundDivisor {
-				saveCache, needSync = true, true
-			}
-
-			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
-				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
-					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-				saveCache = true
-			}
 			if !origin.IsFromHeartbeat() {
 				isNew = true
 			}
