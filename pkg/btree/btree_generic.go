@@ -73,7 +73,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint
+//nolint:all
 package btree
 
 import (

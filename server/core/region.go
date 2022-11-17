@@ -565,6 +565,18 @@ func (r *RegionInfo) GetEndKey() []byte {
 	return r.meta.EndKey
 }
 
+// Less returns true if the region start key is less than the other.
+func (r *RegionInfo) Less(other *RegionInfo) bool {
+	left := r.meta.StartKey
+	right := other.meta.StartKey
+	return bytes.Compare(left, right) < 0
+}
+
+func (r *RegionInfo) Contains(key []byte) bool {
+	start, end := r.GetStartKey(), r.GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+}
+
 // GetPeers returns the peers of the region.
 func (r *RegionInfo) GetPeers() []*metapb.Peer {
 	return r.meta.GetPeers()
@@ -695,28 +707,27 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
-// regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.
-type regionMap map[uint64]*regionItem
+// regionMap wraps a map[uint64]*RegionInfo and supports randomly pick a region. They are the leaves of regionTree.
+type regionMap map[uint64]*RegionInfo
 
 func newRegionMap() regionMap {
-	return make(map[uint64]*regionItem)
+	return make(map[uint64]*RegionInfo)
 }
 
 func (rm regionMap) Len() int {
 	return len(rm)
 }
 
-func (rm regionMap) Get(id uint64) *regionItem {
+func (rm regionMap) Get(id uint64) *RegionInfo {
 	return rm[id]
 }
 
-// AddNew uses RegionInfo to generate a new regionItem.
-// If the regionItem already exists, it will be overwritten.
-// Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
-func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
-	item := &regionItem{RegionInfo: region}
-	rm[region.GetID()] = item
-	return item
+// AddNew uses RegionInfo to generate a new RegionInfo.
+// If the RegionInfo already exists, it will be overwritten.
+// Note: Do not use this function when you only need to update the RegionInfo and do not need a new RegionInfo.
+func (rm regionMap) AddNew(region *RegionInfo) *RegionInfo {
+	rm[region.GetID()] = region
+	return region
 }
 
 func (rm regionMap) Delete(id uint64) {
@@ -750,7 +761,7 @@ func NewRegionsInfo() *RegionsInfo {
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	if item := r.regions.Get(regionID); item != nil {
-		return item.RegionInfo
+		return item
 	}
 	return nil
 }
@@ -758,15 +769,15 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 // overlaps: Other regions that overlap with the specified region, excluding itself.
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
-	var item *regionItem // Pointer to the *RegionInfo of this ID.
+	var item *RegionInfo // Pointer to the *RegionInfo of this ID.
 	rangeChanged := true // This Region is new, or its range has changed.
 	if item = r.regions.Get(region.GetID()); item != nil {
-		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin := item.RegionInfo
+		// If this ID already exists, use the existing RegionInfo and pick out the origin.
+		origin := item
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
-			// Because the regionItem is reused, there is no need to delete it in the regionMap.
+			// Because the RegionInfo is reused, there is no need to delete it in the regionMap.
 			r.tree.remove(origin)
 		} else {
 			// If the range is not changed, only the statistical on the regionTree needs to be updated.
@@ -776,17 +787,17 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		if !rangeChanged && origin.peersEqualTo(region) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
-			// Update the RegionInfo in the regionItem.
-			item.RegionInfo = region
+			// Update the RegionInfo in the RegionInfo.
+			item = region
 			return
 		}
 		// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
-		// Update the RegionInfo in the regionItem.
-		item.RegionInfo = region
+		// Update the RegionInfo in the RegionInfo.
+		item = region
 	} else {
-		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
+		// If this ID does not exist, generate a new RegionInfo and save it in the regionMap.
 		item = r.regions.AddNew(region)
 	}
 
@@ -801,7 +812,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
 
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *RegionInfo) {
 		store, ok := peersMap[storeID]
 		if !ok {
 			store = newRegionTree()
@@ -975,7 +986,7 @@ func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, item.RegionInfo)
+		regions = append(regions, item)
 	}
 	return regions
 }
@@ -1122,7 +1133,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(&regionItem{RegionInfo: region}).RegionInfo
+		return leaders.find(region)
 	}
 	return nil
 }
@@ -1130,7 +1141,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 // GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(&regionItem{RegionInfo: region}).RegionInfo
+		return followers.find(region)
 	}
 	return nil
 }
@@ -1188,12 +1199,12 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 
 // GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
 func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
-	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
-	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	start := &RegionInfo{meta: &metapb.Region{StartKey: startKey}}
+	end := &RegionInfo{meta: &metapb.Region{StartKey: endKey}}
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
-	var item *regionItem
+	var item *RegionInfo
 	// it should return the length of the tree if endKey is nil.
 	if len(endKey) == 0 {
 		endIndex = r.tree.tree.Len() - 1
