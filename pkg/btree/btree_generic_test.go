@@ -79,7 +79,6 @@ func TestBTreeSizeInfo(t *testing.T) {
 	const treeSize = 10000
 	for _, item := range rand.Perm(treeSize) {
 		tr.ReplaceOrInsert(item)
-		println(tr.getRootLength(), tr.Len())
 		assertEq(t, "root length", tr.getRootLength(), tr.Len())
 		min, _ := tr.Min()
 		assertEq(t, "check min", tr.GetAt(0), min)
@@ -433,7 +432,7 @@ func TestDescendGreaterThanG(t *testing.T) {
 
 const benchmarkTreeSize = 10000
 
-func BenchmarkInsertG(b *testing.B) {
+func BenchmarkInsert(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	b.StartTimer()
@@ -450,7 +449,7 @@ func BenchmarkInsertG(b *testing.B) {
 	}
 }
 
-func BenchmarkSeekG(b *testing.B) {
+func BenchmarkSeek(b *testing.B) {
 	b.StopTimer()
 	size := 100000
 	insertP := rand.Perm(size)
@@ -465,7 +464,7 @@ func BenchmarkSeekG(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteInsertG(b *testing.B) {
+func BenchmarkDeleteInsert(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
@@ -479,7 +478,7 @@ func BenchmarkDeleteInsertG(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteInsertCloneOnceG(b *testing.B) {
+func BenchmarkDeleteInsertCloneOnce(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
@@ -494,7 +493,7 @@ func BenchmarkDeleteInsertCloneOnceG(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteInsertCloneEachTimeG(b *testing.B) {
+func BenchmarkDeleteInsertCloneEachTime(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
@@ -509,7 +508,7 @@ func BenchmarkDeleteInsertCloneEachTimeG(b *testing.B) {
 	}
 }
 
-func BenchmarkDeleteG(b *testing.B) {
+func BenchmarkDelete(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	removeP := rand.Perm(benchmarkTreeSize)
@@ -535,7 +534,7 @@ func BenchmarkDeleteG(b *testing.B) {
 	}
 }
 
-func BenchmarkGetG(b *testing.B) {
+func BenchmarkGet(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	removeP := rand.Perm(benchmarkTreeSize)
@@ -558,7 +557,7 @@ func BenchmarkGetG(b *testing.B) {
 	}
 }
 
-func BenchmarkGetCloneEachTimeG(b *testing.B) {
+func BenchmarkGetCloneEachTime(b *testing.B) {
 	b.StopTimer()
 	insertP := rand.Perm(benchmarkTreeSize)
 	removeP := rand.Perm(benchmarkTreeSize)
@@ -582,7 +581,7 @@ func BenchmarkGetCloneEachTimeG(b *testing.B) {
 	}
 }
 
-func BenchmarkAscendG(b *testing.B) {
+func BenchmarkAscend(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -602,7 +601,7 @@ func BenchmarkAscendG(b *testing.B) {
 	}
 }
 
-func BenchmarkDescendG(b *testing.B) {
+func BenchmarkDescend(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -622,7 +621,7 @@ func BenchmarkDescendG(b *testing.B) {
 	}
 }
 
-func BenchmarkAscendRangeG(b *testing.B) {
+func BenchmarkAscendRange(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -645,7 +644,7 @@ func BenchmarkAscendRangeG(b *testing.B) {
 	}
 }
 
-func BenchmarkDescendRangeG(b *testing.B) {
+func BenchmarkDescendRange(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -668,7 +667,7 @@ func BenchmarkDescendRangeG(b *testing.B) {
 	}
 }
 
-func BenchmarkAscendGreaterOrEqualG(b *testing.B) {
+func BenchmarkAscendGreaterOrEqual(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -696,7 +695,7 @@ func BenchmarkAscendGreaterOrEqualG(b *testing.B) {
 	}
 }
 
-func BenchmarkDescendLessOrEqualG(b *testing.B) {
+func BenchmarkDescendLessOrEqual(b *testing.B) {
 	arr := rand.Perm(benchmarkTreeSize)
 	tr := NewOrderedG[int](*btreeDegree)
 	for _, v := range arr {
@@ -783,7 +782,7 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	}
 }
 
-func BenchmarkDeleteAndRestoreG(b *testing.B) {
+func BenchmarkDeleteAndRestore(b *testing.B) {
 	items := rand.Perm(16392)
 	b.ResetTimer()
 	b.Run(`CopyBigFreeList`, func(b *testing.B) {
