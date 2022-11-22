@@ -881,18 +881,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	return nil
 }
 
-<<<<<<< HEAD
-func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
-	leaderCount := c.core.GetStoreLeaderCount(id)
-	regionCount := c.core.GetStoreRegionCount(id)
-	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
-	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
-	regionSize := c.core.GetStoreRegionSize(id)
-	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
-}
-
-=======
->>>>>>> 2b519327b (*: use independent lock (#5587))
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 	if c.storage != nil {
 		if err := c.storage.SaveMeta(meta); err != nil {
