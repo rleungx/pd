@@ -1,18 +1,21 @@
-FROM golang:1.19-alpine as builder
+FROM golang:1.19-bullseye as builder
 
-RUN apk add --no-cache \
-    make \
-    git \
-    bash \
-    curl \
-    gcc \
-    g++ \
-    binutils-gold
+RUN apt update && apt install -y make git curl gcc g++ unzip
 
-# Install jq for pd-ctl
-RUN cd / && \
-    wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -O jq && \
-    chmod +x jq
+# Setup ssh key for private deps
+ARG ssh_key
+RUN if [ -n "$ssh_key" ]; then \
+        mkdir -p ~/.ssh && \
+        echo "$ssh_key" > ~/.ssh/key && \
+        chmod 600 ~/.ssh/key && \
+        echo "Host github.com" >> ~/.ssh/config && \
+        echo "\tUser git" >> ~/.ssh/config && \
+        echo "\tPort 443" >> ~/.ssh/config && \
+        echo "\tHostName ssh.github.com" >> ~/.ssh/config && \
+        echo "\tIdentityFile ~/.ssh/key" >> ~/.ssh/config && \
+        ssh-keyscan -p 443 ssh.github.com>> ~/.ssh/known_hosts && \
+        git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"; \
+    fi
 
 RUN mkdir -p /go/src/github.com/tikv/pd
 WORKDIR /go/src/github.com/tikv/pd
@@ -21,29 +24,19 @@ WORKDIR /go/src/github.com/tikv/pd
 COPY go.mod .
 COPY go.sum .
 
-# Setup access to private repos
-ARG GITHUB_TOKEN
-RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
-
-ENV GOPRIVATE=github.com/tidbcloud
 RUN GO111MODULE=on go mod download
 
 COPY . .
 
 RUN make
 
-FROM alpine:3.17
+FROM debian:bullseye-20220711-slim
+RUN apt update && apt install -y jq bash curl dnsutils wget && rm /bin/sh && ln -s /bin/bash /bin/sh && \
+    apt-get clean autoclean && apt-get autoremove --yes
 
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-recover /pd-recover
-COPY --from=builder /jq /usr/local/bin/jq
-
-RUN apk add --no-cache \
-    curl \
-    wget \
-    bind-tools \
-    bash && rm /bin/sh && ln -s /bin/bash /bin/sh
 
 EXPOSE 2379 2380
 
