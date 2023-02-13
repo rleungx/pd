@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     gcc \
-    g++
+    g++ \
+    binutils-gold
 
 # Install jq for pd-ctl
 RUN cd / && \
@@ -20,13 +21,18 @@ WORKDIR /go/src/github.com/tikv/pd
 COPY go.mod .
 COPY go.sum .
 
+# Setup access to private repos
+ARG GITHUB_TOKEN
+RUN if [ -n "$GITHUB_TOKEN" ]; then git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; fi
+
+ENV GOPRIVATE=github.com/tidbcloud
 RUN GO111MODULE=on go mod download
 
 COPY . .
 
 RUN make
 
-FROM alpine:3.5
+FROM alpine:3.17
 
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl
@@ -34,7 +40,10 @@ COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-recover /pd-recover
 COPY --from=builder /jq /usr/local/bin/jq
 
 RUN apk add --no-cache \
-    curl
+    curl \
+    wget \
+    bind-tools \
+    bash && rm /bin/sh && ln -s /bin/bash /bin/sh
 
 EXPOSE 2379 2380
 
