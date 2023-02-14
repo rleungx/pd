@@ -40,6 +40,12 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router.PATCH("/:name/config", UpdateKeyspaceConfig)
 	router.PUT("/:name/state", UpdateKeyspaceState)
 	router.GET("/id/:id", LoadKeyspaceByID)
+
+	// The following apis uses custom action and are considered deprecated.
+	router.POST("/:name/update-config", UpdateKeyspaceConfig)
+	router.POST("/:name/enable", EnableKeyspace)
+	router.POST("/:name/disable", DisableKeyspace)
+	router.POST("/:name/archive", ArchiveKeyspace)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
@@ -366,4 +372,58 @@ func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 	}
 	meta.KeyspaceMeta = pbMeta
 	return nil
+}
+
+// EnableKeyspace enables target keyspace.
+// @Tags     keyspaces
+// @Summary  Enable keyspace.
+// @Param    name  path  string  true  "Keyspace Name"
+// @Produce  json
+// @Success  200  {object}  KeyspaceMeta
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// Router /keyspaces/{name}/enable [post]
+//
+// Deprecated: use PUT /keyspace/{name}/state instead.
+func EnableKeyspace(c *gin.Context) {
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_ENABLED)
+}
+
+// DisableKeyspace disables target keyspace.
+// @Tags     keyspaces
+// @Summary  Disable keyspace.
+// @Param    name  path  string  true  "Keyspace Name"
+// @Produce  json
+// @Success  200  {object}  KeyspaceMeta
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// Router /keyspaces/{name}/disable [post]
+//
+// Deprecated: use PUT /keyspace/{name}/state instead.
+func DisableKeyspace(c *gin.Context) {
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_DISABLED)
+}
+
+// ArchiveKeyspace archives target keyspace.
+// @Tags     keyspaces
+// @Summary  Archive keyspace.
+// @Param    name  path  string  true  "Keyspace Name"
+// @Produce  json
+// @Success  200  {object}  KeyspaceMeta
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// Router /keyspaces/{name}/archive [post]
+//
+// Deprecated: use PUT /keyspace/{name}/state instead.
+func ArchiveKeyspace(c *gin.Context) {
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_ARCHIVED)
+}
+
+func updateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
+	svr := c.MustGet("server").(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	name := c.Param("name")
+	meta, err := manager.UpdateKeyspaceState(name, state, time.Now().Unix())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
