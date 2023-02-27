@@ -26,19 +26,23 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/member"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
 
 const defaultConsumptionChanSize = 1024
 
+const (
+	metricsCleanupInterval = time.Minute
+	metricsCleanupTimeout  = 20 * time.Minute
+)
+
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	member  *member.Member
+	srv     bs.Server
 	groups  map[string]*ResourceGroup
 	storage endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
@@ -47,17 +51,19 @@ type Manager struct {
 		resourceGroupName string
 		*rmpb.Consumption
 	}
+	// record update time of each resource group
+	comsumptionRecord map[string]time.Time
 }
 
 // NewManager returns a new Manager.
-func NewManager(srv *server.Server) *Manager {
+func NewManager(srv bs.Server) *Manager {
 	m := &Manager{
-		member: &member.Member{},
 		groups: make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
+		comsumptionRecord: make(map[string]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -66,11 +72,16 @@ func NewManager(srv *server.Server) *Manager {
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
 			nil,
 		)
-		m.member = srv.GetMember()
+		m.srv = srv
 	})
-	// The second initialization after the leader is elected.
-	srv.AddLeaderCallback(m.Init)
+	// The second initialization after becoming serving.
+	srv.AddServiceReadyCallback(m.Init)
 	return m
+}
+
+// GetBasicServer returns the basic server.
+func (m *Manager) GetBasicServer() bs.Server {
+	return m.srv
 }
 
 // Init initializes the resource group manager.
@@ -227,6 +238,8 @@ func (m *Manager) persistResourceGroupRunningState() {
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	ticker := time.NewTicker(metricsCleanupInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -274,6 +287,24 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			if consumption.KvWriteRpcCount != 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+
+			m.comsumptionRecord[name] = time.Now()
+
+		case <-ticker.C:
+			// Clean up the metrics that have not been updated for a long time.
+			for name, lastTime := range m.comsumptionRecord {
+				if time.Since(lastTime) > metricsCleanupTimeout {
+					readRequestUnitCost.DeleteLabelValues(name)
+					writeRequestUnitCost.DeleteLabelValues(name)
+					readByteCost.DeleteLabelValues(name)
+					writeByteCost.DeleteLabelValues(name)
+					kvCPUCost.DeleteLabelValues(name)
+					sqlCPUCost.DeleteLabelValues(name)
+					requestCount.DeleteLabelValues(name, readTypeLabel)
+					requestCount.DeleteLabelValues(name, writeTypeLabel)
+					delete(m.comsumptionRecord, name)
+				}
 			}
 		}
 	}

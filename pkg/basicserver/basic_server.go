@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package basicsvr
+package server
 
 import (
 	"context"
@@ -21,20 +21,32 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// MemberProvider defines the common basic behaviors of a member
+type MemberProvider interface {
+	GetName() string
+	GetClientUrls() []string
+}
+
 // Server defines the common basic behaviors of a server
 type Server interface {
 	// Name returns the unique Name for this server in the cluster.
 	Name() string
 	// Context returns the context of server.
 	Context() context.Context
-
 	// Run runs the server.
 	Run() error
 	// Close closes the server.
 	Close()
-
+	// GetPrimary returns the primary of the server.
+	GetPrimary() MemberProvider
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin http client.
 	GetHTTPClient() *http.Client
+	// AddStartCallback adds a callback in the startServer phase.
+	AddStartCallback(callbacks ...func())
+	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+	IsServing() bool
+	// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+	AddServiceReadyCallback(callbacks ...func(context.Context))
 }
