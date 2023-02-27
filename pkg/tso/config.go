@@ -15,12 +15,14 @@
 package tso
 
 import (
-	"flag"
 	"time"
 
-	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -30,12 +32,8 @@ const (
 
 // Config is the configuration for the TSO.
 type Config struct {
-	flagSet *flag.FlagSet
-
-	Version bool `json:"-"`
-
-	ConfigCheck bool `json:"-"`
-	configFile  string
+	BackendEndpoints string `toml:"backend-endpoints" json:"backend-endpoints"`
+	ListenAddr       string `toml:"listen-addr" json:"listen-addr"`
 
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
 	// which allows the PD server to generate Local TSO for certain DC-level transactions.
@@ -57,28 +55,41 @@ type Config struct {
 	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
+
+	// Log related config.
+	Log log.Config `toml:"log" json:"log"`
+
+	Logger   *zap.Logger
+	LogProps *log.ZapProperties
+
+	Security configutil.SecurityConfig `toml:"security" json:"security"`
 }
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
-	cfg := &Config{}
-	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.flagSet
-
-	fs.StringVar(&cfg.configFile, "config", "", "config file")
-
-	return cfg
+	return &Config{}
 }
 
 // Parse parses flag definitions from the argument list.
-func (c *Config) Parse(arguments []string) error {
-	// Parse first to get config file.
-	err := c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
+func (c *Config) Parse(flagSet *pflag.FlagSet) error {
+	// Load config file if specified.
+	if configFile, _ := flagSet.GetString("config"); configFile != "" {
+		_, err := configutil.ConfigFromFile(c, configFile)
+		if err != nil {
+			return err
+		}
 	}
 
-	// TODO: Implement the main function body
+	// ignore the error check here
+	configutil.AdjustCommandlineString(flagSet, &c.Log.Level, "log-level")
+	configutil.AdjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
+	configutil.AdjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
+	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
+	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
 
+	// TODO: Implement the main function body
 	return nil
 }

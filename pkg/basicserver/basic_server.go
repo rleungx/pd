@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package basicsvr
+package server
 
 import (
 	"context"
@@ -27,14 +27,18 @@ type Server interface {
 	Name() string
 	// Context returns the context of server.
 	Context() context.Context
-
 	// Run runs the server.
 	Run() error
 	// Close closes the server.
 	Close()
-
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin http client.
 	GetHTTPClient() *http.Client
+	// AddStartCallback adds a callback in the startServer phase.
+	AddStartCallback(callbacks ...func())
+	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+	IsServing() bool
+	// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+	AddServiceReadyCallback(callbacks ...func(context.Context))
 }

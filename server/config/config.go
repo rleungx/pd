@@ -17,7 +17,6 @@ package config
 import (
 	"crypto/tls"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"math"
 	"net/url"
@@ -27,12 +26,11 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -46,18 +44,11 @@ import (
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Config struct {
-	flagSet *flag.FlagSet
-
-	Version bool `json:"-"`
-
-	ConfigCheck bool `json:"-"`
-
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
@@ -146,11 +137,9 @@ type Config struct {
 
 	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
 
-	Security SecurityConfig `toml:"security" json:"security"`
+	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
-
-	configFile string
 
 	// For all warnings during parsing.
 	WarningMsgs []string
@@ -160,8 +149,8 @@ type Config struct {
 	HeartbeatStreamBindInterval typeutil.Duration
 	LeaderPriorityCheckInterval typeutil.Duration
 
-	logger   *zap.Logger
-	logProps *log.ZapProperties
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
@@ -172,36 +161,7 @@ type Config struct {
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
-	cfg := &Config{}
-	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.flagSet
-
-	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
-	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
-	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.BoolVar(&cfg.ConfigCheck, "config-check", false, "check config file validity and exit")
-
-	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
-
-	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
-	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
-	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
-	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
-	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
-	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
-	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
-
-	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-
-	fs.StringVar(&cfg.Log.Level, "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
-	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
-
-	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
-	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
-	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
-	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "force to create a new one-member cluster")
-
-	return cfg
+	return &Config{}
 }
 
 const (
@@ -338,42 +298,6 @@ func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
 	}
 }
 
-func adjustString(v *string, defValue string) {
-	if len(*v) == 0 {
-		*v = defValue
-	}
-}
-
-func adjustUint64(v *uint64, defValue uint64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustInt64(v *int64, defValue int64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustInt(v *int, defValue int) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustFloat64(v *float64, defValue float64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
-	if v.Duration <= 0 {
-		v.Duration = defValue
-	}
-}
-
 func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	if len(*v) == 0 {
 		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
@@ -391,58 +315,61 @@ func adjustPath(p *string) {
 }
 
 // Parse parses flag definitions from the argument list.
-func (c *Config) Parse(arguments []string) error {
-	// Parse first to get config file.
-	err := c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
+func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
-	var meta *toml.MetaData
-	if c.configFile != "" {
-		meta, err = c.configFromFile(c.configFile)
+	var (
+		meta *toml.MetaData
+		err  error
+	)
+	if configFile, _ := flagSet.GetString("config"); configFile != "" {
+		meta, err = configutil.ConfigFromFile(c, configFile)
 		if err != nil {
 			return err
 		}
 
 		// Backward compatibility for toml config
 		if c.LogFileDeprecated != "" {
-			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", c.configFile)
+			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 			if c.Log.File.Filename == "" {
 				c.Log.File.Filename = c.LogFileDeprecated
 			}
 		}
 		if c.LogLevelDeprecated != "" {
-			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
+			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 			if c.Log.Level == "" {
 				c.Log.Level = c.LogLevelDeprecated
 			}
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
-			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
+			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 		if meta.IsDefined("dashboard", "disable-telemetry") {
-			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
+			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
 
-	// Parse again to replace with command line options.
-	err = c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	// ignore the error check here
+	configutil.AdjustCommandlineString(flagSet, &c.Log.Level, "log-level")
+	configutil.AdjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
+	configutil.AdjustCommandlineString(flagSet, &c.Name, "name")
+	configutil.AdjustCommandlineString(flagSet, &c.DataDir, "data-dir")
+	configutil.AdjustCommandlineString(flagSet, &c.ClientUrls, "client-urls")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseClientUrls, "advertise-client-urls")
+	configutil.AdjustCommandlineString(flagSet, &c.PeerUrls, "peer-urls")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertisePeerUrls, "advertise-peer-urls")
+	configutil.AdjustCommandlineString(flagSet, &c.InitialCluster, "initial-cluster")
+	configutil.AdjustCommandlineString(flagSet, &c.Join, "join")
+	configutil.AdjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
+	configutil.AdjustCommandlineBool(flagSet, &c.ForceNewCluster, "force-new-cluster")
 
-	if len(c.flagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
-	}
-
-	err = c.Adjust(meta, false)
-	return err
+	return c.Adjust(meta, false)
 }
 
 // Validate is used to validate if some configurations are right.
@@ -481,20 +408,20 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		if err != nil {
 			return err
 		}
-		adjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
+		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
+	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 	adjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err
 	}
 
-	adjustString(&c.ClientUrls, defaultClientUrls)
-	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
-	adjustString(&c.PeerUrls, defaultPeerUrls)
-	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
-	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
+	configutil.AdjustString(&c.ClientUrls, defaultClientUrls)
+	configutil.AdjustString(&c.AdvertiseClientUrls, c.ClientUrls)
+	configutil.AdjustString(&c.PeerUrls, defaultPeerUrls)
+	configutil.AdjustString(&c.AdvertisePeerUrls, c.PeerUrls)
+	configutil.AdjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
@@ -508,8 +435,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
-	adjustString(&c.InitialClusterState, defaultInitialClusterState)
-	adjustString(&c.InitialClusterToken, defaultInitialClusterToken)
+	configutil.AdjustString(&c.InitialClusterState, defaultInitialClusterState)
+	configutil.AdjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -517,11 +444,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
-	adjustInt64(&c.LeaderLease, defaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
-	adjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
+	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
@@ -533,18 +460,18 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Labels = make(map[string]string)
 	}
 
-	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
-	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
+	configutil.AdjustString(&c.AutoCompactionMode, defaultCompactionMode)
+	configutil.AdjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
 	if !configMetaData.IsDefined("quota-backend-bytes") {
 		c.QuotaBackendBytes = defaultQuotaBackendBytes
 	}
 	if !configMetaData.IsDefined("max-request-bytes") {
 		c.MaxRequestBytes = defaultMaxRequestBytes
 	}
-	adjustDuration(&c.TickInterval, defaultTickInterval)
-	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
+	configutil.AdjustDuration(&c.TickInterval, defaultTickInterval)
+	configutil.AdjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
-	adjustString(&c.Metric.PushJob, c.Name)
+	configutil.AdjustString(&c.Metric.PushJob, c.Name)
 
 	if err := c.Schedule.adjust(configMetaData.Child("schedule"), reloading); err != nil {
 		return err
@@ -558,9 +485,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	adjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
+	configutil.AdjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
-	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+	configutil.AdjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	if !configMetaData.IsDefined("enable-prevote") {
 		c.PreVote = true
@@ -600,12 +527,6 @@ func (c *Config) String() string {
 		return "<nil>"
 	}
 	return string(data)
-}
-
-// configFromFile loads config from file.
-func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
-	meta, err := toml.DecodeFile(path, c)
-	return &meta, errors.WithStack(err)
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -811,52 +732,52 @@ const (
 
 func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {
-		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
+		configutil.AdjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	}
 	if !meta.IsDefined("max-pending-peer-count") {
-		adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
+		configutil.AdjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	}
 	if !meta.IsDefined("max-merge-region-size") {
-		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
-	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
-	adjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
-	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
-	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	adjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+	configutil.AdjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
+	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
+	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
 	if !meta.IsDefined("leader-schedule-limit") {
-		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}
 	if !meta.IsDefined("region-schedule-limit") {
-		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+		configutil.AdjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	}
 	if !meta.IsDefined("witness-schedule-limit") {
-		adjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
+		configutil.AdjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
 	}
 	if !meta.IsDefined("replica-schedule-limit") {
-		adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+		configutil.AdjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
 	}
 	if !meta.IsDefined("merge-schedule-limit") {
-		adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
+		configutil.AdjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-schedule-limit") {
-		adjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
+		configutil.AdjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
-		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
+		configutil.AdjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
-		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+		configutil.AdjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
 	}
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
-		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
+		configutil.AdjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
 	if !meta.IsDefined("leader-schedule-policy") {
-		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
+		configutil.AdjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
 	}
 	if !meta.IsDefined("store-limit-mode") {
-		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+		configutil.AdjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
@@ -867,8 +788,8 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
-	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
-	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
+	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
 	}
@@ -879,7 +800,7 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
-		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
@@ -902,11 +823,11 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 
 	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
+		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
 	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
-		adjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
+		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
 	return c.Validate()
 }
@@ -1116,7 +1037,7 @@ func (c *ReplicationConfig) Validate() error {
 }
 
 func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
-	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	configutil.AdjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
 	}
@@ -1164,7 +1085,7 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
-	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
+	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
 	}
@@ -1181,13 +1102,13 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
-		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
+		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
+		configutil.AdjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
 	if !meta.IsDefined("server-memory-limit") {
-		adjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
+		configutil.AdjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
 	}
 	if c.ServerMemoryLimit < minServerMemoryLimit {
 		c.ServerMemoryLimit = minServerMemoryLimit
@@ -1195,7 +1116,7 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.ServerMemoryLimit = maxServerMemoryLimit
 	}
 	if !meta.IsDefined("server-memory-limit-gc-trigger") {
-		adjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
+		configutil.AdjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
 	}
 	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
 		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
@@ -1206,7 +1127,7 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.EnableGOGCTuner = defaultEnableGOGCTuner
 	}
 	if !meta.IsDefined("gc-tuner-threshold") {
-		adjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+		configutil.AdjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
 	}
 	if c.GCTunerThreshold < minGCTunerThreshold {
 		c.GCTunerThreshold = minGCTunerThreshold
@@ -1305,33 +1226,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// SetupLogger setup the logger.
-func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
-	}
-	c.logger = lg
-	c.logProps = p
-	logutil.SetRedactLog(c.Security.RedactInfoLog)
-	return nil
-}
-
-// GetZapLogger gets the created zap logger.
-func (c *Config) GetZapLogger() *zap.Logger {
-	return c.logger
-}
-
-// GetZapLogProperties gets properties of the zap logger.
-func (c *Config) GetZapLogProperties() *log.ZapProperties {
-	return c.logProps
-}
-
-// GetConfigFile gets the config file.
-func (c *Config) GetConfigFile() string {
-	return c.configFile
-}
-
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
@@ -1386,7 +1280,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
-	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.EnableV2 = true
 	cfg.Logger = "zap"
@@ -1497,14 +1391,6 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
-}
-
-// SecurityConfig indicates the security configuration for pd server
-type SecurityConfig struct {
-	grpcutil.TLSConfig
-	// RedactInfoLog indicates that whether enabling redact log
-	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
-	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
