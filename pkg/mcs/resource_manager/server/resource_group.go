@@ -40,7 +40,7 @@ type ResourceGroup struct {
 
 // RequestUnitSettings is the definition of the RU settings.
 type RequestUnitSettings struct {
-	RU GroupTokenBucket `json:"ru,omitempty"`
+	RU GroupTokenBucket `json:"r_u,omitempty"`
 }
 
 // RawResourceSettings is the definition of the native resource settings.
