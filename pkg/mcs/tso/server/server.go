@@ -573,7 +573,7 @@ func (s *Server) startServer() (err error) {
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
-	s.tsoAllocatorManager = tso.NewAllocatorManager(
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.etcdClient, "API service",
 		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.

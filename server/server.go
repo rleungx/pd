@@ -95,11 +95,6 @@ const (
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
-	// PDMode represents that server is in PD mode.
-	PDMode = "PD"
-	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API service"
-
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
 	maxRetryTimesGetServicePrimary = 25
@@ -202,7 +197,6 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry          *registry.ServiceRegistry
-	mode              string
 	servicePrimaryMap sync.Map /* Store as map[string]string */
 }
 
@@ -211,13 +205,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	var mode string
-	if len(services) == 0 {
-		mode = PDMode
-	} else {
-		mode = APIServiceMode
-	}
-	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
+	log.Info(fmt.Sprintf("%s config", cfg.GetServiceMode()), zap.Reflect("config", cfg))
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
@@ -230,7 +218,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		mode:                            mode,
 	}
 	s.handler = newHandler(s)
 
@@ -385,17 +372,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
-			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
-		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-		if !s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-				return err
-			}
+
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.client, config.PDMode,
+		s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
 		}
 		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
@@ -697,11 +683,6 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
-}
-
-// IsAPIServiceMode return whether the server is in API service mode.
-func (s *Server) IsAPIServiceMode() bool {
-	return s.mode == APIServiceMode
 }
 
 // GetAddr returns the server urls for clients.
@@ -1183,6 +1164,11 @@ func (s *Server) GetClusterVersion() semver.Version {
 	return *s.persistOptions.GetClusterVersion()
 }
 
+// GetServiceMode returns the service mode of cluster.
+func (s *Server) GetServiceMode() string {
+	return s.persistOptions.GetServiceMode()
+}
+
 // GetTLSConfig get the security config.
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
@@ -1387,7 +1373,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.IsClosed() {
-			log.Info(fmt.Sprintf("server is closed, return %s leader loop", s.mode))
+			log.Info(fmt.Sprintf("server is closed, return %s leader loop", s.GetServiceMode()))
 			return
 		}
 
@@ -1431,13 +1417,13 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
+	log.Info(fmt.Sprintf("start to campaign %s leader", s.GetServiceMode()), zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
+			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.GetServiceMode()),
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
-			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
+			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.GetServiceMode()),
 				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
 		}
@@ -1457,27 +1443,25 @@ func (s *Server) campaignLeader() {
 
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
-	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); err != nil {
-					panic(err)
-				}
-			})
-		}()
+	log.Info(fmt.Sprintf("campaign %s leader ok", s.GetServiceMode()), zap.String("campaign-leader-name", s.Name()))
+	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
+		return
 	}
+	log.Info("initializing the global TSO allocator")
+	if err := allocator.Initialize(0); err != nil {
+		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+		return
+	}
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			if err = allocator.UpdateTSO(); err != nil {
+				panic(err)
+			}
+		})
+	}()
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
@@ -1522,7 +1506,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	CheckPDVersion(s.persistOptions)
-	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
+	log.Info(fmt.Sprintf("%s leader is ready to serve", s.GetServiceMode()), zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()

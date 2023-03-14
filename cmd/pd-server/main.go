@@ -150,7 +150,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	flagSet.Parse(args)
-	err := cfg.Parse(flagSet)
+	err := cfg.Parse(flagSet, services)
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -185,9 +185,9 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	defer log.Sync()
 
 	if len(services) != 0 {
-		versioninfo.Log(server.APIServiceMode)
+		versioninfo.Log(config.APIMode)
 	} else {
-		versioninfo.Log(server.PDMode)
+		versioninfo.Log(config.PDMode)
 	}
 
 	for _, msg := range cfg.WarningMsgs {

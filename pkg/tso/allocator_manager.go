@@ -16,12 +16,14 @@ package tso
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -177,10 +179,15 @@ type AllocatorManager struct {
 		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
+	client  *clientv3.Client
+	mode    string
+	serving atomic.Bool
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
+	client *clientv3.Client,
+	mode string,
 	m Member,
 	rootPath string,
 	storage endpoint.TSOStorage,
@@ -199,6 +206,8 @@ func NewAllocatorManager(
 		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         tlsConfig,
+		client:                 client,
+		mode:                   mode,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -625,39 +634,92 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(PriorityCheck)
 	defer checkerTicker.Stop()
+	config := make(map[string]interface{})
+	res, err := etcdutil.EtcdKVGet(am.client, path.Join(am.rootPath, "config"))
+	if err != nil {
+		log.Error("get serving status failed", errs.ZapError(err))
+	}
+	if err := json.Unmarshal(res.Kvs[0].Value, &config); err != nil {
+		log.Error("unmarshal failed", errs.ZapError(err))
+	}
+	am.updateServingStatus(config)
+	rch := am.client.Watch(serverCtx, path.Join(am.rootPath, "config"))
 
 	for {
 		select {
-		case <-patrolTicker.C:
-			// Inspect the cluster dc-location info and set up the new Local TSO Allocator in time.
-			am.allocatorPatroller(serverCtx)
-		case <-tsTicker.C:
-			// Update the initialized TSO Allocator to advance TSO.
-			am.allocatorUpdater()
-		case <-checkerTicker.C:
-			// Check and maintain the cluster's meta info about dc-location distribution.
-			go am.ClusterDCLocationChecker()
-			// We won't have any Local TSO Allocator set up in PD without enabling Local TSO.
-			if am.enableLocalTSO {
-				// Check the election priority of every Local TSO Allocator this PD is holding.
-				go am.PriorityChecker()
+		case res := <-rch:
+			for _, event := range res.Events {
+				if event.Type != clientv3.EventTypePut {
+					continue
+				}
+				if err := json.Unmarshal(event.Kv.Value, &config); err != nil {
+					log.Error("unmarshal failed", errs.ZapError(err))
+					continue
+				}
 			}
-			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
-			// we should run them concurrently to speed up the progress.
+			am.updateServingStatus(config)
+		case <-patrolTicker.C:
+			if am.serving.Load() {
+				// Inspect the cluster dc-location info and set up the new Local TSO Allocator in time.
+				am.allocatorPatroller(serverCtx)
+			}
+		case <-tsTicker.C:
+			if am.serving.Load() {
+				// Update the initialized TSO Allocator to advance TSO.
+				am.allocatorUpdater()
+			}
+		case <-checkerTicker.C:
+			if am.serving.Load() {
+				// Check and maintain the cluster's meta info about dc-location distribution.
+				go am.ClusterDCLocationChecker()
+				// We won't have any Local TSO Allocator set up in PD without enabling Local TSO.
+				if am.enableLocalTSO {
+					// Check the election priority of every Local TSO Allocator this PD is holding.
+					go am.PriorityChecker()
+				}
+				// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+				// we should run them concurrently to speed up the progress.
+			}
 		case <-serverCtx.Done():
 			return
 		}
 	}
 }
 
+func (am *AllocatorManager) updateServingStatus(config map[string]interface{}) {
+	if pdConfig, ok := config["pd-server"].(map[string]interface{}); ok {
+		if mode, ok := pdConfig["service-mode"].(string); ok {
+			if am.mode != mode {
+				am.serving.Store(false)
+				am.resetAllocator()
+			} else {
+				am.serving.Store(true)
+			}
+		}
+	}
+}
+
 // Update the Local TSO Allocator leaders TSO in memory concurrently.
 func (am *AllocatorManager) allocatorUpdater() {
+	log.Info("XXXXXX", zap.Any("mode", am.mode))
 	// Filter out allocators without leadership and uninitialized
 	allocatorGroups := am.getAllocatorGroups(FilterUninitialized(), FilterUnavailableLeadership())
 	// Update each allocator concurrently
 	for _, ag := range allocatorGroups {
 		am.wg.Add(1)
 		go am.updateAllocator(ag)
+	}
+	am.wg.Wait()
+}
+
+// resetAllocator is used to reset the allocator in the group.
+func (am *AllocatorManager) resetAllocator() {
+	// Filter out allocators without leadership and uninitialized
+	allocatorGroups := am.getAllocatorGroups(FilterUninitialized(), FilterUnavailableLeadership())
+	// Update each allocator concurrently
+	for _, ag := range allocatorGroups {
+		am.wg.Add(1)
+		go ag.allocator.Reset()
 	}
 	am.wg.Wait()
 }

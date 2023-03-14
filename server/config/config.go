@@ -240,6 +240,13 @@ const (
 	maxGCTunerThreshold               = 0.9
 )
 
+const (
+	// PDMode represents that server is in PD mode.
+	PDMode = "PD"
+	// APIMode represents that server is in API service mode.
+	APIMode = "API"
+)
+
 // Special keys for Labels
 const (
 	// ZoneLabel is the name of the key which indicates DC location of this PD server.
@@ -247,6 +254,7 @@ const (
 )
 
 var (
+	defaultMode            = PDMode
 	defaultEnableTelemetry = false
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
@@ -311,7 +319,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 }
 
 // Parse parses flag definitions from the argument list.
-func (c *Config) Parse(flagSet *pflag.FlagSet) error {
+func (c *Config) Parse(flagSet *pflag.FlagSet, services []string) error {
 	// Load config file if specified.
 	var (
 		meta *toml.MetaData
@@ -360,6 +368,10 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
 	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
 	configutil.AdjustCommandlineBool(flagSet, &c.ForceNewCluster, "force-new-cluster")
+
+	if len(services) != 0 {
+		c.PDServerCfg.ServiceMode = APIMode
+	}
 
 	return c.Adjust(meta, false)
 }
@@ -1075,6 +1087,7 @@ type PDServerConfig struct {
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	ServiceMode      string  `toml:"service-mode" json:"service-mode"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -1126,6 +1139,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.GCTunerThreshold = minGCTunerThreshold
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
+	}
+	if !meta.IsDefined("service-mode") {
+		configutil.AdjustString(&c.ServiceMode, defaultMode)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
@@ -1233,6 +1249,11 @@ func (c *Config) GetTSOSaveInterval() time.Duration {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
+}
+
+// GetServiceMode returns the service mode.
+func (c *Config) GetServiceMode() string {
+	return c.PDServerCfg.ServiceMode
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.

@@ -647,6 +647,11 @@ func (o *PersistOptions) IsTraceRegionFlow() bool {
 	return o.GetPDServerConfig().FlowRoundByDigit <= maxTraceFlowRoundByDigit
 }
 
+// GetServiceMode returns the service mode.
+func (o *PersistOptions) GetServiceMode() string {
+	return o.GetPDServerConfig().ServiceMode
+}
+
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
 func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
