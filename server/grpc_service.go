@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -132,11 +133,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsAPIServiceMode() {
-		tsoAllocatorManager := s.GetTSOAllocatorManager()
-		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
-	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -186,7 +185,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
-		if s.IsAPIServiceMode() {
+		if s.GetServiceMode() == config.APIMode {
 			forwardedHost, ok := s.GetServicePrimaryAddr(ctx, "tso")
 			if !ok || forwardedHost == "" {
 				return ErrNotFoundTSOAddr
@@ -1514,7 +1513,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		nowTSO pdpb.Timestamp
 		err    error
 	)
-	if s.IsAPIServiceMode() {
+	if s.GetServiceMode() == config.APIMode {
 		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
 	} else {
 		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
@@ -2212,7 +2211,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		nowTSO pdpb.Timestamp
 		err    error
 	)
-	if s.IsAPIServiceMode() {
+	if s.GetServiceMode() == config.APIMode {
 		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
 	} else {
 		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)

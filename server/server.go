@@ -1382,10 +1382,9 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if !s.IsAPIServiceMode() {
-				// Check the cluster dc-location after the PD leader is elected
-				go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			}
+			// Check the cluster dc-location after the PD leader is elected
+			go s.tsoAllocatorManager.ClusterDCLocationChecker()
+
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1489,10 +1488,9 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if !s.IsAPIServiceMode() {
-		// Check the cluster dc-location after the PD leader is elected.
-		go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	}
+	// Check the cluster dc-location after the PD leader is elected.
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
+
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
