@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
@@ -107,7 +108,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) R
 }
 
 func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsAPIServiceMode() {
+	if h.s.GetServiceMode() == config.PDMode {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {

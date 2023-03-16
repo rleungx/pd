@@ -520,19 +520,14 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(7)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service
-		s.serverLoopWg.Add(2)
-		go s.watchServicePrimaryAddrLoop("tso")
-		go s.watchServicePrimaryAddrLoop("resource_manager")
-	} else { // enable tso service
-		s.serverLoopWg.Add(1)
-		go s.tsoAllocatorLoop()
-	}
+	go s.tsoAllocatorLoop()
+	go s.watchServicePrimaryAddrLoop("tso")
+	go s.watchServicePrimaryAddrLoop("resource_manager")
 }
 
 func (s *Server) stopServerLoop() {
