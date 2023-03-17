@@ -74,9 +74,10 @@ func CreateKeyspace(c *gin.Context) {
 		return
 	}
 	req := &keyspace.CreateKeyspaceRequest{
-		Name:   createParams.Name,
-		Config: createParams.Config,
-		Now:    time.Now().Unix(),
+		Name:       createParams.Name,
+		Config:     createParams.Config,
+		Now:        time.Now().Unix(),
+		IsPreAlloc: false,
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {

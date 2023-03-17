@@ -71,7 +71,8 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 				testConfig1: "100",
 				testConfig2: "200",
 			},
-			Now: now,
+			Now:        now,
+			IsPreAlloc: true,
 		}
 	}
 	return requests

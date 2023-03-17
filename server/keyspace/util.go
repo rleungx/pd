@@ -39,7 +39,10 @@ var (
 	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
 	// ErrKeyspaceExists indicates target keyspace already exists.
 	// Used when creating a new keyspace.
-	ErrKeyspaceExists   = errors.New("keyspace already exists")
+	ErrKeyspaceExists = errors.New("keyspace already exists")
+	// ErrRegionSplitTimeout indices to split region timeout
+	ErrRegionSplitTimeout = errors.New("region split timeout")
+
 	errModifyDefault    = errors.New("cannot modify default keyspace's state")
 	errIllegalOperation = errors.New("unknown operation")
 

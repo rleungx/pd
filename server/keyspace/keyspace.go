@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"go.uber.org/zap"
 )
 
@@ -73,6 +75,8 @@ type CreateKeyspaceRequest struct {
 	Config map[string]string
 	// Now is the timestamp used to record creation time.
 	Now int64
+	// IsPreAlloc indicates whether the keyspace is pre-allocated when the cluster starts.
+	IsPreAlloc bool
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -94,7 +98,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
 	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(DefaultKeyspaceID); err != nil {
+	if err := manager.splitKeyspaceRegion(DefaultKeyspaceID, false); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
@@ -116,8 +120,9 @@ func (manager *Manager) Bootstrap() error {
 	preAlloc := manager.config.PreAlloc
 	for _, keyspaceName := range preAlloc {
 		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
-			Name: keyspaceName,
-			Now:  now,
+			Name:       keyspaceName,
+			Now:        now,
+			IsPreAlloc: true,
 		})
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 		if err != nil && err != ErrKeyspaceExists {
@@ -125,6 +130,11 @@ func (manager *Manager) Bootstrap() error {
 		}
 	}
 	return nil
+}
+
+// UpdateConfig update keyspace manager's config.
+func (manager *Manager) UpdateConfig(cfg *config.KeyspaceConfig) {
+	manager.config = *cfg
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
@@ -138,8 +148,11 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
+	// If the request to create a keyspace is pre-allocated when the PD starts,
+	// there is no need to wait for the region split, because TiKV has not started.
+	waitRegionSplit := !request.IsPreAlloc && manager.config.WaitRegionSplit
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID)
+	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
 	if err != nil {
 		return nil, err
 	}
@@ -201,24 +214,73 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32) error {
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
+	start := time.Now()
 	keyspaceRule := makeLabelRule(id)
-	err := manager.rc.GetRegionLabeler().SetLabelRule(keyspaceRule)
+	err = manager.rc.GetRegionLabeler().SetLabelRule(keyspaceRule)
 	if err != nil {
 		log.Warn("[keyspace] failed to add region label for keyspace",
 			zap.Uint32("keyspaceID", id),
 			zap.Error(err),
 		)
+		return
 	}
+	defer func() {
+		if err != nil {
+			manager.rc.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID)
+		}
+	}()
+
+	if waitRegionSplit {
+		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
+		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
+		txnLeftBound, txnRightBound := ranges[1].StartKey, ranges[1].EndKey
+
+		ticker := time.NewTicker(manager.config.CheckRegionSplitInterval.Duration)
+		timer := time.NewTimer(manager.config.WaitRegionSplitTimeout.Duration)
+		for {
+			select {
+			case <-ticker.C:
+				regionsInfo := manager.rc.GetBasicCluster().RegionsInfo
+				region := regionsInfo.GetRegionByKey(rawLeftBound)
+				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
+					continue
+				}
+				region = regionsInfo.GetRegionByKey(rawRightBound)
+				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
+					continue
+				}
+				region = regionsInfo.GetRegionByKey(txnLeftBound)
+				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
+					continue
+				}
+				region = regionsInfo.GetRegionByKey(txnRightBound)
+				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
+					continue
+				}
+			case <-timer.C:
+				log.Warn("[keyspace] wait region split timeout",
+					zap.Uint32("keyspaceID", id),
+					zap.Error(err),
+				)
+				err = ErrRegionSplitTimeout
+				return
+			}
+			log.Info("[keyspace] wait reigon split successfully", zap.Uint32("keyspaceID", id))
+			break
+		}
+	}
+
 	log.Info("[keyspace] added region label for keyspace",
 		zap.Uint32("keyspaceID", id),
 		zap.Any("LabelRule", keyspaceRule),
+		zap.Duration("takes", time.Since(start)),
 	)
-	return nil
+	return
 }
 
 // LoadKeyspace returns the keyspace specified by name.
