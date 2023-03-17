@@ -242,6 +242,10 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 
 		ticker := time.NewTicker(manager.config.CheckRegionSplitInterval.Duration)
 		timer := time.NewTimer(manager.config.WaitRegionSplitTimeout.Duration)
+		defer func() {
+			ticker.Stop()
+			timer.Stop()
+		}()
 		for {
 			select {
 			case <-ticker.C:
