@@ -46,6 +46,10 @@ const (
 	regionLabelIDPrefix = "keyspaces/"
 	// regionLabelKey is the key for keyspace id in keyspace region label.
 	regionLabelKey = "id"
+	// UserKindKey is the key for user kind in keyspace config.
+	UserKindKey = "user_kind"
+	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
+	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 )
 
 // Manager manages keyspace related data.
@@ -63,6 +67,8 @@ type Manager struct {
 	ctx context.Context
 	// config is the configurations of the manager.
 	config config.KeyspaceConfig
+	// keyspaceGroupManager manages keyspace group related data.
+	kgm *GroupManager
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -80,6 +86,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 	rc *cluster.RaftCluster,
 	idAllocator id.Allocator,
 	config config.KeyspaceConfig,
+	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
@@ -88,6 +95,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		rc:          rc,
 		ctx:         context.TODO(),
 		config:      config,
+		kgm:         kgm,
 	}
 }
 
@@ -98,14 +106,22 @@ func (manager *Manager) Bootstrap() error {
 		return err
 	}
 	now := time.Now().Unix()
+	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
+	if err != nil {
+		return err
+	}
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
+		Config: map[string]string{
+			UserKindKey:           endpoint.Basic.String(),
+			TSOKeyspaceGroupIDKey: id,
+		},
 	}
-	err := manager.saveNewKeyspace(defaultKeyspace)
+	err = manager.saveNewKeyspace(defaultKeyspace)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
@@ -115,9 +131,17 @@ func (manager *Manager) Bootstrap() error {
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.PreAlloc
 	for _, keyspaceName := range preAlloc {
+		id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
+		if err != nil {
+			return err
+		}
 		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: keyspaceName,
 			Now:  now,
+			Config: map[string]string{
+				UserKindKey:           endpoint.Basic.String(),
+				TSOKeyspaceGroupIDKey: id,
+			},
 		})
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 		if err != nil && err != ErrKeyspaceExists {
@@ -143,6 +167,16 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
+	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(userKind)
+	if err != nil {
+		return nil, err
+	}
+	if request.Config == nil {
+		request.Config = make(map[string]string)
+	}
+	request.Config[TSOKeyspaceGroupIDKey] = id
+	request.Config[UserKindKey] = userKind.String()
 	// Create and save keyspace metadata.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,

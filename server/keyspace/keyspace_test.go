@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -40,6 +41,8 @@ const (
 
 type keyspaceTestSuite struct {
 	suite.Suite
+	ctx     context.Context
+	cancel  context.CancelFunc
 	manager *Manager
 }
 
@@ -48,10 +51,16 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{})
+	kgm := NewKeyspaceGroupManager(suite.ctx, store)
+	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{}, kgm)
 	suite.NoError(suite.manager.Bootstrap())
+}
+
+func (suite *keyspaceTestSuite) TearDownTest() {
+	suite.cancel()
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {
@@ -149,6 +158,9 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	// Changing config of DEFAULT keyspace is allowed.
 	updated, err := manager.UpdateKeyspaceConfig(DefaultKeyspaceName, mutations)
 	re.NoError(err)
+	// remove auto filled fields
+	delete(updated.Config, TSOKeyspaceGroupIDKey)
+	delete(updated.Config, UserKindKey)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
