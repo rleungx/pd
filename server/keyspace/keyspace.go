@@ -23,11 +23,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
@@ -62,7 +63,7 @@ type Manager struct {
 	// store is the storage for keyspace related information.
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
-	rc *cluster.RaftCluster
+	cluster schedule.Cluster
 	// ctx is the context of the manager, to be used in transaction.
 	ctx context.Context
 	// config is the configurations of the manager.
@@ -83,7 +84,7 @@ type CreateKeyspaceRequest struct {
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
 func NewKeyspaceManager(store endpoint.KeyspaceStorage,
-	rc *cluster.RaftCluster,
+	cluster schedule.Cluster,
 	idAllocator id.Allocator,
 	config config.KeyspaceConfig,
 	kgm *GroupManager,
@@ -92,7 +93,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
 		idAllocator: idAllocator,
 		store:       store,
-		rc:          rc,
+		cluster:     cluster,
 		ctx:         context.TODO(),
 		config:      config,
 		kgm:         kgm,
@@ -241,18 +242,21 @@ func (manager *Manager) splitKeyspaceRegion(id uint32) error {
 	})
 
 	keyspaceRule := makeLabelRule(id)
-	err := manager.rc.GetRegionLabeler().SetLabelRule(keyspaceRule)
-	if err != nil {
-		log.Warn("[keyspace] failed to add region label for keyspace",
+	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		err := cl.GetRegionLabeler().SetLabelRule(keyspaceRule)
+		if err != nil {
+			log.Warn("[keyspace] failed to add region label for keyspace",
+				zap.Uint32("keyspaceID", id),
+				zap.Error(err),
+			)
+		}
+		log.Info("[keyspace] added region label for keyspace",
 			zap.Uint32("keyspaceID", id),
-			zap.Error(err),
+			zap.Any("LabelRule", keyspaceRule),
 		)
+		return nil
 	}
-	log.Info("[keyspace] added region label for keyspace",
-		zap.Uint32("keyspaceID", id),
-		zap.Any("LabelRule", keyspaceRule),
-	)
-	return nil
+	return errors.New("cluster does not support region label")
 }
 
 // LoadKeyspace returns the keyspace specified by name.
