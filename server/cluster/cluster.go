@@ -85,7 +85,7 @@ const (
 	updateStoreStatsInterval     = 9 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
-	gcTombstoreInterval          = 30 * 24 * time.Hour
+	gcTombstoneInterval          = 30 * 24 * time.Hour
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
@@ -1630,15 +1630,15 @@ func (c *RaftCluster) checkStores() {
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
-			if store.DownTime() > gcTombstoreInterval {
+			if store.DownTime() > gcTombstoneInterval {
 				err := c.deleteStore(store)
 				if err != nil {
-					log.Error("auto gc the tombstore store failed",
+					log.Error("auto gc the tombstone store failed",
 						zap.Stringer("store", store.GetMeta()),
 						zap.Duration("down-time", store.DownTime()),
 						errs.ZapError(err))
 				} else {
-					log.Info("auto gc the tombstore store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+					log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 				}
 			}
 			continue
@@ -2326,11 +2326,9 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(
-		core.SetMinResolvedTS(minResolvedTS),
-	)
-
-	return c.putStoreLocked(newStore)
+	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
+	c.core.PutStore(newStore)
+	return nil
 }
 
 func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {

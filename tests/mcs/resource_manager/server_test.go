@@ -21,14 +21,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
+	"github.com/tikv/pd/tests/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -36,7 +35,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -46,19 +45,12 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg := rm.NewConfig()
-	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = "127.0.0.1:8086"
-
-	svr := rm.NewServer(ctx, cfg)
-	go svr.Run()
-	testutil.Eventually(re, func() bool {
-		return svr.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-	defer svr.Close()
+	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
+	addr := s.GetAddr()
+	defer cleanup()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	cc, err := grpcutil.GetClientConn(ctx, addr, nil)
 	re.NoError(err)
 	defer cc.Close()
 	c := rmpb.NewResourceManagerClient(cc)
@@ -68,7 +60,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := "http://" + cfg.ListenAddr + "/resource-manager/api/v1/config"
+	url := addr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)

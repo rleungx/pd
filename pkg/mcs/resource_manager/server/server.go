@@ -32,8 +32,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -42,14 +42,6 @@ import (
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-)
-
-const (
-	tcp = "tcp"
-	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
-	defaultGRPCGracefulStopTimeout = 5 * time.Second
-	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
-	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -61,9 +53,10 @@ type Server struct {
 	ctx          context.Context
 	serverLoopWg sync.WaitGroup
 
-	cfg         *Config
-	name        string
-	backendUrls []url.URL
+	cfg       *Config
+	clusterID uint64
+	name      string
+	listenURL *url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -88,8 +81,13 @@ func (s *Server) Context() context.Context {
 	return s.ctx
 }
 
-// Run runs the pd server.
-func (s *Server) Run() error {
+// GetAddr returns the server address.
+func (s *Server) GetAddr() string {
+	return s.cfg.ListenAddr
+}
+
+// Run runs the Resource Manager server.
+func (s *Server) Run() (err error) {
 	if err := s.initClient(); err != nil {
 		return err
 	}
@@ -148,16 +146,15 @@ func (s *Server) IsServing() bool {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return s != nil && atomic.LoadInt64(&s.isServing) == 0
 }
 
-// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
 func (s *Server) initClient() error {
-	// TODO: We need to keep all backend endpoints and keep updating them to the latest. Once one of them failed, need to try another one.
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -166,8 +163,7 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.backendUrls = []url.URL(u)
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClientsWithMultiEndpoint(tlsConfig, []url.URL(u))
 	return err
 }
 
@@ -189,8 +185,8 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(defaultGRPCGracefulStopTimeout):
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", defaultGRPCGracefulStopTimeout))
+	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
+		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
 		gs.Stop()
 	}
 	if s.IsClosed() {
@@ -212,7 +208,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	err := hs.Serve(l)
 	log.Info("http server stop serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -246,8 +242,8 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	}
 }
 
-// GetPrimary returns the primary member.
-func (s *Server) GetPrimary() bs.MemberProvider {
+// GetLeaderListenUrls gets service endpoints from the leader in election group.
+func (s *Server) GetLeaderListenUrls() []string {
 	// TODO: implement this function with primary.
 	return nil
 }
@@ -263,10 +259,14 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcp, s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err

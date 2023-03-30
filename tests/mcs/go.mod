@@ -5,9 +5,11 @@ go 1.19
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20230321060725-1841520d34ba
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.uber.org/goleak v1.1.12
 	google.golang.org/grpc v1.51.0
 )
@@ -100,7 +102,6 @@ require (
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20230209052558-a58fc2a7e924 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_golang v1.11.0 // indirect
@@ -134,7 +135,6 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -31,13 +32,9 @@ import (
 )
 
 const (
-	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3380"
-	defaultEnableGRPCGateway = true
-
-	defaultLogFormat           = "text"
-	defaultDisableErrorVerbose = true
+	defaultName             = "Resource Manager"
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	defaultListenAddr       = "http://127.0.0.1:3379"
 
 	defaultReadBaseCost  = 0.25
 	defaultWriteBaseCost = 1
@@ -51,11 +48,12 @@ const (
 
 // Config is the configuration for the resource manager.
 type Config struct {
-	BackendEndpoints  string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr        string `toml:"listen-addr" json:"listen-addr"`
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`      // TODO: use it
+	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
+	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
+	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	Name                string `toml:"name" json:"name"`
+	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
+	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -139,6 +137,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
 	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
 	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
 	return c.Adjust(meta, false)
 }
@@ -160,7 +159,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	c.adjustPath()
+	configutil.AdjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err
@@ -168,16 +167,17 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
+	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = defaultEnableGRPCGateway
+		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
 	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
+		c.Log.Format = utils.DefaultLogFormat
 	}
 
 	c.RequestUnit.Adjust()
@@ -185,16 +185,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	return nil
 }
 
-func (c *Config) adjustPath() {
-	absPath, err := filepath.Abs(c.DataDir)
-	if err == nil {
-		c.DataDir = absPath
-	}
-}
-
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
 }
 

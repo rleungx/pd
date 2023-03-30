@@ -104,15 +104,12 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface {
-		GetLeaderAddr() string
-		ScheduleCheckLeader()
-	})
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	suite.True(ok)
 	suite.NotNil(innerCli)
 	testutil.Eventually(suite.Require(), func() bool {
-		innerCli.ScheduleCheckLeader()
-		return innerCli.GetLeaderAddr() == leaderAddr
+		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
+		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
 	})
 }
 

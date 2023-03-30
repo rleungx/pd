@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -77,11 +76,17 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
 	// internally, and returns unexpected keys such as "foo_bar/baz".
 	key = strings.Join([]string{kv.rootPath, key}, "/")
-	endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
+	var OpOption []clientv3.OpOption
+	// If endKey is "\x00", it means to scan with prefix.
+	if endKey == "\x00" {
+		OpOption = append(OpOption, clientv3.WithPrefix())
+	} else {
+		endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
+		OpOption = append(OpOption, clientv3.WithRange(endKey))
+	}
 
-	withRange := clientv3.WithRange(endKey)
-	withLimit := clientv3.WithLimit(int64(limit))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, withRange, withLimit)
+	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
+	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -189,10 +194,8 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 // Transaction commit will be successful only if all conditions are met,
 // aka, no other transaction has modified values loaded during current transaction.
 type etcdTxn struct {
-	kv  *etcdKVBase
-	ctx context.Context
-	// mu protects conditions and operations.
-	mu         syncutil.Mutex
+	kv         *etcdKVBase
+	ctx        context.Context
 	conditions []clientv3.Cmp
 	operations []clientv3.Op
 }
@@ -215,8 +218,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 func (txn *etcdTxn) Save(key, value string) error {
 	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpPut(key, value)
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.operations = append(txn.operations, operation)
 	return nil
 }
@@ -225,8 +226,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 func (txn *etcdTxn) Remove(key string) error {
 	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpDelete(key)
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.operations = append(txn.operations, operation)
 	return nil
 }
@@ -255,8 +254,6 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
 	// Append the check condition to transaction.
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.conditions = append(txn.conditions, condition)
 	return value, nil
 }
@@ -270,8 +267,6 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 		return keys, values, err
 	}
 	// If LoadRange successful, must make sure values stay the same before commit.
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	for i := range keys {
 		fullKey := path.Join(txn.kv.rootPath, keys[i])
 		condition := clientv3.Compare(clientv3.Value(fullKey), "=", values[i])
