@@ -20,6 +20,7 @@ import (
 	"io"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -337,6 +338,9 @@ errHandling:
 			close(done)
 			if err != nil {
 				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+				if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
+					s.updateServicePrimaryAddrCh <- struct{}{}
+				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
