@@ -288,7 +288,7 @@ type syncResp struct {
 
 // SyncMaxTS is used to sync MaxTS with all Local TSO Allocator leaders in dcLocationMap.
 // If maxTSO is the biggest TSO among all Local TSO Allocators, it will be written into
-// each allocator and remines the same after the synchronization.
+// each allocator and remains the same after the synchronization.
 // If not, it will be replaced with the new max Local TSO and return.
 func (gta *GlobalTSOAllocator) SyncMaxTS(
 	ctx context.Context,

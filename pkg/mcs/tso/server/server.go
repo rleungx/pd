@@ -279,6 +279,11 @@ func (s *Server) campaignLeader() {
 	}
 
 	s.participant.EnableLeader()
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		s.participant.ResetLeader()
+	})
+
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
 	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
