@@ -306,7 +306,6 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		if meta == nil {
 			return ErrKeyspaceNotFound
 		}
-		meta.Id = id
 		return nil
 	})
 	return meta, err
@@ -329,7 +328,6 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
-	meta.Id = spaceID
 	return meta, err
 }
 
