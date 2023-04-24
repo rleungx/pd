@@ -31,6 +31,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -119,6 +120,26 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 		defer resp.Body.Close()
 		re.Equal(http.StatusBadRequest, resp.StatusCode)
 	}
+}
+
+func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() {
+	re := suite.Require()
+
+	cfg := tso.NewConfig()
+	cfg.BackendEndpoints = suite.backendEndpoints
+	cfg.ListenAddr = tempurl.Alloc()
+	cfg.AdvertiseListenAddr = tempurl.Alloc()
+	cfg, err := tso.GenerateConfig(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := tso.NewTSOTestServer(suite.ctx, re, cfg)
+	re.NoError(err)
+	defer cleanup()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	re.Equal(cfg.AdvertiseListenAddr, s.GetMemberName())
 }
 
 func TestTSOPath(t *testing.T) {
@@ -414,7 +435,7 @@ func TestMetrics(t *testing.T) {
 	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, leader.GetAddr(), u)
 	defer cleanup()
 
-	resp, err := http.Get(s.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	resp, err := http.Get(s.GetConfig().AdvertiseListenAddr + "/metrics")
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)

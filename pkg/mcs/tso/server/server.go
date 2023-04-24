@@ -358,6 +358,11 @@ func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
 }
 
+// GetMemberName returns the name of the member in election group.
+func (s *Server) GetMemberName() string {
+	return s.participant.Name()
+}
+
 // AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
@@ -590,7 +595,7 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
-	uniqueName := s.listenURL.Host // in the host:port format
+	uniqueName := s.cfg.AdvertiseListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
