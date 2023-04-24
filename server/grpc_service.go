@@ -52,8 +52,9 @@ const (
 	heartbeatSendTimeout = 5 * time.Second
 
 	// tso
-	maxMergeTSORequests    = 10000
-	defaultTSOProxyTimeout = 3 * time.Second
+	maxMergeTSORequests                    = 10000
+	defaultTSOProxyTimeout                 = 3 * time.Second
+	maxRetryTimesGetGlobalTSOFromTSOServer = 3
 )
 
 // gRPC errors
@@ -339,7 +340,11 @@ errHandling:
 			if err != nil {
 				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
 				if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
-					s.updateServicePrimaryAddrCh <- struct{}{}
+					select {
+					case s.updateServicePrimaryAddrCh <- struct{}{}:
+						log.Info("update service primary address")
+					default:
+					}
 				}
 				select {
 				case <-dispatcherCtx.Done():
@@ -1993,24 +1998,40 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	if !ok || forwardedHost == "" {
 		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 	}
-	forwardStream, err := s.getTSOForwardStream(forwardedHost)
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	forwardStream.Send(&tsopb.TsoRequest{
+	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
 			KeyspaceId:      utils.DefaultKeyspaceID,
 			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 		},
 		Count: 1,
-	})
-	ts, err := forwardStream.Recv()
-	if err != nil {
-		log.Error("get global tso from tso server failed", zap.Error(err))
-		return pdpb.Timestamp{}, err
 	}
-	return *ts.GetTimestamp(), nil
+	var (
+		forwardStream tsopb.TSO_TsoClient
+		ts            *tsopb.TsoResponse
+		err           error
+	)
+	for i := 0; i < maxRetryTimesGetGlobalTSOFromTSOServer; i++ {
+		forwardStream, err = s.getTSOForwardStream(forwardedHost)
+		if err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		forwardStream.Send(request)
+		ts, err = forwardStream.Recv()
+		if err != nil {
+			if strings.Contains(err.Error(), codes.Unavailable.String()) {
+				s.tsoClientPool.Lock()
+				delete(s.tsoClientPool.clients, forwardedHost)
+				s.tsoClientPool.Unlock()
+				continue
+			}
+			log.Error("get global tso from tso service primary addr failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
+		}
+		return *ts.GetTimestamp(), nil
+	}
+	log.Error("get global tso from tso service primary addr failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	return pdpb.Timestamp{}, err
 }
 
 func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
