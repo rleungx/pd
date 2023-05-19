@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -806,10 +806,10 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreDown(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
@@ -1021,10 +1021,10 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	suite.Nil(suite.rc.Check(region))
 
 	suite.cluster.SetStoreOffline(4)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreOffline(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)

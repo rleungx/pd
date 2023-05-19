@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -211,7 +212,7 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
-			log.Info("exit tso dispacther loop")
+			log.Info("exit tso dispatcher loop")
 			return
 		}
 	}
@@ -376,7 +377,8 @@ tsoBatchLoop:
 					zap.String("dc-location", dc))
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
-					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+					zap.String("dc-location", dc),
+					errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("when fetch pending tso requests"), err))
 			}
 			return
 		}
@@ -404,7 +406,7 @@ tsoBatchLoop:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.svcDiscovery.ScheduleCheckMemberChanged()
-					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
 					continue streamChoosingLoop
@@ -440,7 +442,7 @@ tsoBatchLoop:
 		case tsDeadlineCh.(chan deadline) <- dl:
 		}
 		opts = extractSpanReference(tbc, opts[:0])
-		err = c.processTSORequests(stream, dc, tbc, opts)
+		err = c.processRequests(stream, dc, tbc, opts)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
@@ -450,7 +452,10 @@ tsoBatchLoop:
 			default:
 			}
 			c.svcDiscovery.ScheduleCheckMemberChanged()
-			log.Error("[tso] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
+			log.Error("[tso] getTS error",
+				zap.String("dc-location", dc),
+				zap.String("stream-addr", streamAddr),
+				errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("after processing requests"), err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
@@ -497,8 +502,8 @@ func (c *tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoCo
 
 type tsoConnectionContext struct {
 	streamAddr string
-	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluser,
-	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO clusrer
+	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluster,
+	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO cluster
 	stream tsoStream
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -615,7 +620,7 @@ func (c *tsoClient) tryConnectToTSO(
 // or of keyspace group primary/secondaries.
 func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 	var (
-		addrs          = c.svcDiscovery.GetURLs()
+		addrs          = c.svcDiscovery.GetServiceURLs()
 		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
 		cc             *grpc.ClientConn
 		err            error
@@ -662,7 +667,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {
-			log.Info("[tso] use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
+			log.Info("[tso] use follower to forward tso stream to do the proxy",
+				zap.String("dc", dc), zap.String("addr", addr))
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 		}
 		// Create the TSO stream.
@@ -676,7 +682,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 			connectionCtxs.Store(addr, &tsoConnectionContext{addr, stream, cctx, cancel})
 			continue
 		}
-		log.Error("[tso] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
+		log.Error("[tso] create the tso stream failed",
+			zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
 		cancel()
 	}
 	return nil
@@ -691,33 +698,32 @@ func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanO
 	return opts
 }
 
-func (c *tsoClient) processTSORequests(stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
+func (c *tsoClient) processRequests(
+	stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption,
+) error {
 	if len(opts) > 0 {
-		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
+		span := opentracing.StartSpan("pdclient.processRequests", opts...)
 		defer span.Finish()
 	}
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(), dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(
+		c.svcDiscovery.GetClusterID(), c.svcDiscovery.GetKeyspaceID(), c.svcDiscovery.GetKeyspaceGroupID(),
+		dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
-		c.finishTSORequest(requests, 0, 0, 0, err)
+		c.finishRequest(requests, 0, 0, 0, err)
 		return err
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-	firstLogical := addLogical(logical, -count+1, suffixBits)
+	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
-	c.finishTSORequest(requests, physical, firstLogical, suffixBits, nil)
+	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
-// Because of the suffix, we need to shift the count before we add it to the logical part.
-func addLogical(logical, count int64, suffixBits uint32) int64 {
-	return logical + count<<suffixBits
-}
-
 func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
-	largestLogical := addLogical(firstLogical, count-1, suffixBits)
+	largestLogical := tsoutil.AddLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
 		physical: physical,
 		// Save the largest logical part here
@@ -729,9 +735,10 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical to compare with the new TSO's first logical.
-	// For example, if we have a TSO resp with logical 10, count 5, then all TSOs we get will be [6, 7, 8, 9, 10].
-	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
+	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
+	// all TSOs we get will be [6, 7, 8, 9, 10].
+	if tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
@@ -740,19 +747,12 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	lastTSOPointer.logical = largestLogical
 }
 
-func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
-	if physical == thatPhysical {
-		return logical <= thatLogical
-	}
-	return physical < thatPhysical
-}
-
-func (c *tsoClient) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
+func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()
 		}
-		requests[i].physical, requests[i].logical = physical, addLogical(firstLogical, int64(i), suffixBits)
+		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
 		requests[i].done <- err
 	}
 }

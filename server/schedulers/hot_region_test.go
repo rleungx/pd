@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
@@ -264,15 +264,15 @@ func checkByteRateOnly(re *require.Assertions, tc *mockcluster.Cluster, hb sched
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
-			testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 4:
 			// balance by peer selected
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				testutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
-				testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
 			}
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -292,10 +292,10 @@ func checkByteRateOnly(re *require.Assertions, tc *mockcluster.Cluster, hb sched
 		re.Equal(4, op.Len())
 		if op.RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			testutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
 		} else {
 			// peer in store 1 of the region 1,3 can only transfer to store 6
-			testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
 		}
 	}
 
@@ -358,16 +358,16 @@ func checkByteRateOnly(re *require.Assertions, tc *mockcluster.Cluster, hb sched
 		switch op.RegionID() {
 		case 1, 2:
 			if op.Len() == 3 {
-				testutil.CheckTransferPeer(re, op, operator.OpHotRegion, 3, 6)
+				operatorutil.CheckTransferPeer(re, op, operator.OpHotRegion, 3, 6)
 			} else if op.Len() == 4 {
-				testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
 			} else {
 				re.FailNow("wrong operator: " + op.String())
 			}
 		case 3:
-			testutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 5)
+			operatorutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 5)
 		case 5:
-			testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 3, 6)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 3, 6)
 		default:
 			re.FailNow("wrong operator: " + op.String())
 		}
@@ -484,10 +484,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
-			testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 2:
 			// balance by peer selected
-			testutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
+			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
 		default:
 			re.FailNow("wrong op: " + op.String())
 		}
@@ -498,7 +498,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
-		testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+		operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 	}
 	// | store_id | write_bytes_rate |
 	// |----------|------------------|
@@ -575,15 +575,15 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
-			testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 4:
 			// balance by peer selected
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				testutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
-				testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
 			}
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -628,7 +628,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
-		testutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 3)
+		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 3)
 	}
 }
 
@@ -672,21 +672,21 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
-		testutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 4)
+		operatorutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 4)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
 		// store key rate (min, max):  (10, 10.5) | 9.5 | 9.8 | (9, 9.5) | 9.2
 
 		ops, _ = hb.Schedule(tc, false)
 		op = ops[0]
 		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
-		testutil.CheckTransferPeer(re, op, operator.OpHotRegion, 3, 5)
+		operatorutil.CheckTransferPeer(re, op, operator.OpHotRegion, 3, 5)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
 		// store key rate (min, max):  (10, 10.5) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
 
 		// byteDecRatio <= 0.95
 		// op = hb.Schedule(tc, false)[0]
 		// FIXME: cover this case
-		// testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
+		// operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
 		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
 		// store key rate (min, max):  (9.2, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
 	}
@@ -834,7 +834,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
-		testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 2)
+		operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 2)
 		ops, _ = hb.Schedule(tc, false)
 		re.Empty(ops)
 	}
@@ -915,10 +915,10 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 				switch op.Len() {
 				case 1:
 					// balance by leader selected
-					testutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+					operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 				case 4:
 					// balance by peer selected
-					testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 4)
+					operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 4)
 					cnt++
 					if cnt == 3 {
 						re.True(op.Cancel())
@@ -1012,7 +1012,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		// The targetID should always be 1 as leader is only allowed to be placed in store1 or store2 by placement rule
-		testutil.CheckTransferLeader(re, op, operator.OpHotRegion, 2, 1)
+		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 2, 1)
 		ops, _ = hb.Schedule(tc, false)
 		re.Empty(ops)
 	}
@@ -1084,7 +1084,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 
 	// move leader from store 1 to store 5
 	// it is better than transfer leader from store 1 to store 3
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
 	re.Contains(hb.regionPendings, uint64(1))
 	re.True(typeutil.Float64Equal(512.0*units.KiB, hb.regionPendings[1].origin.Loads[statistics.RegionReadBytes]))
 	clearPendingInfluence(hb)
@@ -1123,7 +1123,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// We will move leader peer of region 1 from 1 to 5
 	ops, _ = hb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion|operator.OpLeader, 1, 5)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion|operator.OpLeader, 1, 5)
 	re.Contains(hb.regionPendings, uint64(1))
 	re.True(typeutil.Float64Equal(512.0*units.KiB, hb.regionPendings[1].origin.Loads[statistics.RegionReadBytes]))
 	clearPendingInfluence(hb)
@@ -1172,7 +1172,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
-		testutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 3)
+		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 3)
 	}
 }
 
@@ -1215,21 +1215,21 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
-		testutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 4)
+		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 4)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
 		// store key rate (min, max):  (10, 10.5) | 9.5 | 9.8 | (9, 9.5) | 9.2
 
 		ops, _ = hb.Schedule(tc, false)
 		op = ops[0]
 		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
-		testutil.CheckTransferLeader(re, op, operator.OpHotRegion, 3, 5)
+		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 3, 5)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
 		// store key rate (min, max):  (10, 10.5) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
 
 		// byteDecRatio <= 0.95
 		// FIXME: cover this case
 		// op = hb.Schedule(tc, false)[0]
-		// testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
+		// operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 5)
 		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
 		// store key rate (min, max):  (9.2, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
 	}
@@ -1304,7 +1304,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 
 			ops, _ := hb.Schedule(tc, false)
 			op1 := ops[0]
-			testutil.CheckTransferPeer(re, op1, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op1, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			pendingAmpFactor = old
@@ -1314,7 +1314,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 
 			ops, _ = hb.Schedule(tc, false)
 			op2 := ops[0]
-			testutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops, _ = hb.Schedule(tc, false)
@@ -1327,18 +1327,18 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 
 			ops, _ := hb.Schedule(tc, false)
 			op1 := ops[0]
-			testutil.CheckTransferPeer(re, op1, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op1, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 			ops, _ = hb.Schedule(tc, false)
 			op2 := ops[0]
-			testutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 			re.True(op2.Cancel())
 
 			ops, _ = hb.Schedule(tc, false)
 			op2 = ops[0]
-			testutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
 			// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
 			re.True(op1.Cancel())
@@ -1346,7 +1346,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 
 			ops, _ = hb.Schedule(tc, false)
 			op3 := ops[0]
-			testutil.CheckTransferPeer(re, op3, operator.OpHotRegion, 1, 4)
+			operatorutil.CheckTransferPeer(re, op3, operator.OpHotRegion, 1, 4)
 			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
 			ops, _ = hb.Schedule(tc, false)
@@ -1389,7 +1389,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	clearPendingInfluence(hb.(*hotScheduler))
-	testutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion|operator.OpLeader, 1, 4)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion|operator.OpLeader, 1, 4)
 	// two dim are both enough uniform among three stores
 	tc.SetStoreEvictLeader(4, true)
 	ops, _ = hb.Schedule(tc, false)
@@ -1944,7 +1944,7 @@ func TestHotReadPeerSchedule(t *testing.T) {
 	tc.AddRegionWithPeerReadInfo(1, 3, 1, uint64(0.9*units.KiB*float64(10)), uint64(0.9*units.KiB*float64(10)), 10, []uint64{1, 2}, 3)
 	ops, _ := hb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 4)
+	operatorutil.CheckTransferPeer(re, op, operator.OpHotRegion, 1, 4)
 }
 
 func TestHotScheduleWithPriority(t *testing.T) {
@@ -1988,12 +1988,12 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	// assert read priority schedule
@@ -2010,12 +2010,12 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
 
 	hb, err = schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
@@ -2035,7 +2035,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	tc.UpdateStorageWrittenStats(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -2050,7 +2050,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 }
 
@@ -2092,7 +2092,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	stddevThreshold = -1.0
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	// skip -1 case (uniform cluster)
@@ -2111,7 +2111,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	stddevThreshold = -1.0
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 }
 
@@ -2152,11 +2152,11 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
 }
 
 func TestCompatibility(t *testing.T) {

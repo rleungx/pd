@@ -27,9 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/tests"
 )
@@ -81,8 +81,9 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	var err error
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", i),
-			Now:  now,
+			Name:       fmt.Sprintf("test_keyspace_%d", i),
+			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}

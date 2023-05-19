@@ -1235,6 +1235,11 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
+}
+
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
@@ -1421,7 +1426,7 @@ func (c *KeyspaceConfig) Validate() error {
 			minCheckRegionSplitInterval, maxCheckRegionSplitInterval))
 	}
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
-		return errors.New(fmt.Sprintf("[keyspace] check-region-split-interval should be less than wait-region-split-timeout"))
+		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
 	}
 	return nil
 }
@@ -1444,4 +1449,24 @@ func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
 	cfg := *c
 	cfg.PreAlloc = preAlloc
 	return &cfg
+}
+
+// GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
+func (c *KeyspaceConfig) GetPreAlloc() []string {
+	return c.PreAlloc
+}
+
+// ToWaitRegionSplit returns whether to wait for the region split to complete.
+func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
+	return c.WaitRegionSplit
+}
+
+// GetWaitRegionSplitTimeout returns the max duration to wait region split.
+func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
+	return c.WaitRegionSplitTimeout.Duration
+}
+
+// GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
+func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
+	return c.CheckRegionSplitInterval.Duration
 }

@@ -63,7 +63,7 @@ create TSO stream failed, %s
 
 ["PD:client:ErrClientGetLeader"]
 error = '''
-get leader from %v error
+get leader failed, %v
 '''
 
 ["PD:client:ErrClientGetMember"]
@@ -481,6 +481,11 @@ error = '''
 init file log error, %s
 '''
 
+["PD:member:ErrCheckCampaign"]
+error = '''
+check campaign failed
+'''
+
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -711,9 +716,49 @@ error = '''
 get allocator failed, %s
 '''
 
+["PD:tso:ErrGetAllocatorManager"]
+error = '''
+get allocator manager failed, %s
+'''
+
 ["PD:tso:ErrGetLocalAllocator"]
 error = '''
 get local allocator failed, %s
+'''
+
+["PD:tso:ErrGetMinTS"]
+error = '''
+get min ts failed, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIDInvalid"]
+error = '''
+the keyspace group id is invalid, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupNotInitialized"]
+error = '''
+the keyspace group %d isn't initialized
+'''
+
+["PD:tso:ErrKeyspaceNotAssigned"]
+error = '''
+the keyspace %d isn't assigned to any keyspace group
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"]
+error = '''
+load keyspace groups retry exhausted, %s
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTerminated"]
+error = '''
+load keyspace groups terminated
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTimeout"]
+error = '''
+load keyspace groups timeout
 '''
 
 ["PD:tso:ErrLogicOverflow"]

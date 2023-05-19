@@ -25,8 +25,8 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
-	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20230321060725-1841520d34ba
+	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
+	github.com/pingcap/kvproto v0.0.0-20230511011722-6e0e8a7deaa1
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20230209052558-a58fc2a7e924
@@ -37,8 +37,8 @@ require (
 	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.1
-	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
+	github.com/stretchr/testify v1.8.2
+	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
@@ -47,12 +47,14 @@ require (
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.19.1
 	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
-	golang.org/x/text v0.4.0
+	golang.org/x/text v0.9.0
 	golang.org/x/time v0.1.0
-	golang.org/x/tools v0.2.0
+	golang.org/x/tools v0.6.0
 	google.golang.org/grpc v1.51.0
 	gotest.tools/gotestsum v1.7.0
 )
+
+require github.com/shirou/gopsutil v3.21.3+incompatible // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -98,7 +100,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
-	github.com/google/uuid v1.3.0 // indirect
+	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
@@ -140,14 +142,13 @@ require (
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
 	github.com/samber/lo v1.37.0 // indirect
-	github.com/sergi/go-diff v1.0.1-0.20180205163309-da645544ed44 // indirect
-	github.com/shirou/gopsutil v3.21.3+incompatible // indirect
+	github.com/sergi/go-diff v1.1.0 // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.4.2 // indirect
 	github.com/soheilhy/cmux v0.1.4
 	github.com/stretchr/objx v0.5.0 // indirect
-	github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 // indirect
+	github.com/swaggo/files v0.0.0-20210815190702-a29dd2bc99b2 // indirect
 	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
@@ -165,13 +166,13 @@ require (
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
-	golang.org/x/image v0.0.0-20200119044424-58c23975cae1 // indirect
-	golang.org/x/mod v0.6.0 // indirect
-	golang.org/x/net v0.2.0 // indirect
-	golang.org/x/oauth2 v0.0.0-20221014153046-6fdb5e3db783 // indirect
+	golang.org/x/image v0.5.0 // indirect
+	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/net v0.9.0 // indirect
+	golang.org/x/oauth2 v0.4.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.3.0 // indirect
-	golang.org/x/term v0.2.0 // indirect
+	golang.org/x/sys v0.7.0 // indirect
+	golang.org/x/term v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20221202195650-67e5cbc046fd // indirect
 	google.golang.org/protobuf v1.28.1 // indirect

@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
@@ -70,13 +71,13 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/gc"
-	"github.com/tikv/pd/server/keyspace"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -84,7 +85,6 @@ import (
 
 const (
 	serverMetricsInterval = time.Minute
-	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -105,8 +105,6 @@ const (
 	maxRetryTimesGetServicePrimary = 25
 	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
 	retryIntervalGetServicePrimary = 100 * time.Millisecond
-	// TODO: move it to etcdutil
-	watchEtcdChangeRetryInterval = 1 * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -124,8 +122,8 @@ var (
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
-	// Server state.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 
 	// Server start timestamp
 	startTimestamp int64
@@ -165,6 +163,8 @@ type Server struct {
 	gcSafePointManager *gc.SafePointManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
+	// keyspace group manager
+	keyspaceGroupManager *keyspace.GroupManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -197,7 +197,13 @@ type Server struct {
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
-	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+	tsoDispatcher *tsoutil.TSODispatcher
+	// tsoProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the TSO grpc service
+	tsoProtoFactory *tsoutil.TSOProtoFactory
+	// pdProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the PD grpc service
+	pdProtoFactory *tsoutil.PDProtoFactory
 
 	serviceRateLimiter *ratelimit.Limiter
 	serviceLabels      map[string][]apiutil.AccessPath
@@ -210,9 +216,7 @@ type Server struct {
 	registry          *registry.ServiceRegistry
 	mode              string
 	servicePrimaryMap sync.Map /* Store as map[string]string */
-	// updateServicePrimaryAddrCh is used to notify the server to update the service primary address.
-	// Note: it is only used in API service mode.
-	updateServicePrimaryAddrCh chan struct{}
+	tsoPrimaryWatcher *etcdutil.LoopWatcher
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -400,12 +404,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
+	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
+	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
-			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -435,7 +438,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
+	}
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -450,7 +456,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
 
@@ -461,7 +467,7 @@ func (s *Server) AddCloseCallback(callbacks ...func()) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -469,6 +475,9 @@ func (s *Server) Close() {
 	log.Info("closing server")
 
 	s.stopServerLoop()
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
@@ -506,7 +515,7 @@ func (s *Server) Close() {
 
 // IsClosed checks whether server is closed or not.
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
 // Run runs the pd server.
@@ -554,12 +563,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service in api server
+	if s.IsAPIServiceMode() {
+		s.initTSOPrimaryWatcher()
 		s.serverLoopWg.Add(1)
-		go s.startWatchServicePrimaryAddrLoop(mcs.TSOServiceName)
-	} else { // enable tso service
-		s.serverLoopWg.Add(1)
-		go s.tsoAllocatorLoop()
+		go s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -583,17 +590,6 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-func (s *Server) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx)
-	log.Info("server is closed, exit allocator loop")
 }
 
 // encryptionKeyManagerLoop is used to start monitor encryption key changes.
@@ -692,7 +688,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
+		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
 
 	return &pdpb.BootstrapResponse{
@@ -820,6 +816,11 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 // GetKeyspaceManager returns the keyspace manager of server.
 func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
+}
+
+// GetKeyspaceGroupManager returns the keyspace group manager of server.
+func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
+	return s.keyspaceGroupManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -1329,7 +1330,7 @@ func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
-// IsInRateLimitAllowList returns whethis given service label is in allow lost
+// IsInRateLimitAllowList returns whether given service label is in allow lost
 func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
 	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
 }
@@ -1431,7 +1432,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader()
+		leader, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
@@ -1447,11 +1448,11 @@ func (s *Server) leaderLoop() {
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
-				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
-			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
+			leader.Watch(s.serverLoopCtx)
 			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
@@ -1565,7 +1566,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(leaderTickInterval)
+	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -1752,126 +1753,46 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 	return "", false
 }
 
-// startWatchServicePrimaryAddrLoop starts a loop to watch the primary address of a given service.
-func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.updateServicePrimaryAddrCh = make(chan struct{}, 1)
-	serviceKey := s.servicePrimaryKey(serviceName)
-	var (
-		revision int64
-		err      error
-	)
-	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
-		revision, err = s.updateServicePrimaryAddr(serviceName)
-		if revision != 0 && err == nil { // update success
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retryIntervalGetServicePrimary):
-		}
-	}
-	if err != nil {
-		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey), zap.Error(err))
-	}
-	log.Info("start to watch service primary addr", zap.String("service-key", serviceKey))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exist watch service primary addr loop", zap.String("service", serviceName))
-			return
-		default:
-		}
-		nextRevision, err := s.watchServicePrimaryAddr(ctx, serviceName, revision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
-				zap.Error(err))
-			revision = nextRevision
-			time.Sleep(watchEtcdChangeRetryInterval)
-		}
-	}
-}
-
-// watchServicePrimaryAddr watches the primary address on etcd.
-func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string, revision int64) (nextRevision int64, err error) {
-	serviceKey := s.servicePrimaryKey(serviceName)
-	watcher := clientv3.NewWatcher(s.client)
-	defer watcher.Close()
-
-	for {
-	WatchChan:
-		watchChan := watcher.Watch(s.serverLoopCtx, serviceKey, clientv3.WithRev(revision))
-		select {
-		case <-ctx.Done():
-			return revision, nil
-		case <-s.updateServicePrimaryAddrCh:
-			revision, err = s.updateServicePrimaryAddr(serviceName)
-			if err != nil {
-				log.Warn("update service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
-			}
-			goto WatchChan
-		case wresp := <-watchChan:
-			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
-				revision = wresp.CompactRevision
-				goto WatchChan
-			}
-			if wresp.Err() != nil {
-				log.Error("watcher is canceled with",
-					zap.Int64("revision", revision),
-					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
-				return revision, wresp.Err()
-			}
-			for _, event := range wresp.Events {
-				switch event.Type {
-				case clientv3.EventTypePut:
-					primary := &tsopb.Participant{}
-					if err := proto.Unmarshal(event.Kv.Value, primary); err != nil {
-						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
-					} else {
-						listenUrls := primary.GetListenUrls()
-						if len(listenUrls) > 0 {
-							// listenUrls[0] is the primary service endpoint of the keyspace group
-							s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-						} else {
-							log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
-						}
-					}
-				case clientv3.EventTypeDelete:
-					log.Warn("service primary is deleted", zap.String("service-key", serviceKey))
-					s.servicePrimaryMap.Delete(serviceName)
-				}
-			}
-			revision = wresp.Header.Revision + 1
-		}
-	}
-}
-
-// updateServicePrimaryAddr updates the primary address from etcd with get operation.
-func (s *Server) updateServicePrimaryAddr(serviceName string) (nextRevision int64, err error) {
-	serviceKey := s.servicePrimaryKey(serviceName)
-	primary := &tsopb.Participant{}
-	ok, revision, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
-	listenUrls := primary.GetListenUrls()
-	if !ok || err != nil || len(listenUrls) == 0 {
-		return 0, err
-	}
-	// listenUrls[0] is the primary service endpoint of the keyspace group
-	s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-	log.Info("update service primary addr", zap.String("service-key", serviceKey), zap.String("primary-addr", listenUrls[0]))
-	return revision, nil
+// SetServicePrimaryAddr sets the primary address directly.
+// Note: This function is only used for test.
+func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
+	s.servicePrimaryMap.Store(serviceName, addr)
 }
 
 func (s *Server) servicePrimaryKey(serviceName string) string {
 	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
+}
+
+func (s *Server) initTSOPrimaryWatcher() {
+	serviceName := mcs.TSOServiceName
+	tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	putFn := func(kv *mvccpb.KeyValue) error {
+		primary := &tsopb.Participant{} // TODO: use Generics
+		if err := proto.Unmarshal(kv.Value, primary); err != nil {
+			return err
+		}
+		listenUrls := primary.GetListenUrls()
+		if len(listenUrls) > 0 {
+			// listenUrls[0] is the primary service endpoint of the keyspace group
+			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+			log.Info("update tso primary", zap.String("primary", listenUrls[0]))
+		}
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		s.servicePrimaryMap.Delete(serviceName)
+		return nil
+	}
+	s.tsoPrimaryWatcher = etcdutil.NewLoopWatcher(
+		s.serverLoopCtx,
+		&s.serverLoopWg,
+		s.client,
+		"tso-primary-watcher",
+		tsoServicePrimaryKey,
+		putFn,
+		deleteFn,
+		func() error { return nil },
+	)
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id
@@ -1899,4 +1820,29 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	}
 	s.GetRaftCluster().SetExternalTS(externalTS)
 	return nil
+}
+
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (s *Server) IsLocalTSOEnabled() bool {
+	return s.cfg.IsLocalTSOEnabled()
+}
+
+// GetLeaderLease returns the leader lease.
+func (s *Server) GetLeaderLease() int64 {
+	return s.cfg.GetLeaderLease()
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (s *Server) GetTSOSaveInterval() time.Duration {
+	return s.cfg.GetTSOSaveInterval()
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
+	return s.cfg.GetTSOUpdatePhysicalInterval()
+}
+
+// GetMaxResetTSGap gets the max gap to reset the tso.
+func (s *Server) GetMaxResetTSGap() time.Duration {
+	return s.persistOptions.GetMaxResetTSGap()
 }

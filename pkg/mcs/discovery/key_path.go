@@ -14,17 +14,25 @@
 
 package discovery
 
-import "path"
+import (
+	"strconv"
+	"strings"
+)
 
 const (
-	registryPrefix = "/pd/microservice"
+	registryPrefix = "/ms"
 	registryKey    = "registry"
 )
 
-func registryPath(serviceName, serviceAddr string) string {
-	return path.Join(registryPrefix, serviceName, registryKey, serviceAddr)
+func registryPath(clusterID, serviceName, serviceAddr string) string {
+	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey, serviceAddr}, "/")
 }
 
-func discoveryPath(serviceName string) string {
-	return path.Join(registryPrefix, serviceName, registryKey)
+func discoveryPath(clusterID, serviceName string) string {
+	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey}, "/")
+}
+
+// TSOPath returns the path to store TSO addresses.
+func TSOPath(clusterID uint64) string {
+	return discoveryPath(strconv.FormatUint(clusterID, 10), "tso") + "/"
 }

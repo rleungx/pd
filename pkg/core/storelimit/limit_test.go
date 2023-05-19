@@ -23,7 +23,8 @@ import (
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
 	rate := int64(15)
-	limit := NewStoreRateLimit(float64(rate))
+	limit := NewStoreRateLimit(float64(rate)).(*StoreRateLimit)
+	re.Equal(limit.Rate(AddPeer), float64(15))
 	re.True(limit.Available(influence*rate, AddPeer))
 	re.True(limit.Take(influence*rate, AddPeer))
 	re.False(limit.Take(influence, AddPeer))

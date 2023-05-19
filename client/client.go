@@ -43,8 +43,16 @@ import (
 const (
 	// defaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
+	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
 	defaultKeyspaceID = uint32(0)
+	maxKeyspaceID     = uint32(0xFFFFFF)
+	// nullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
+	nullKeyspaceID = uint32(0xFFFFFFFF)
+	// defaultKeySpaceGroupID is the default key space group id.
+	// We also reserved 0 for the keyspace group for the same purpose.
+	defaultKeySpaceGroupID = uint32(0)
+	defaultKeyspaceName    = "DEFAULT"
 )
 
 // Region contains information of a region's meta and its peers.
@@ -205,6 +213,8 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// errInvalidRespHeader is returned when the response doesn't contain service mode info unexpectedly.
+	errNoServiceModeReturned = errors.New("[pd] no service mode returned")
 )
 
 // ClientOption configures client.
@@ -240,12 +250,29 @@ func WithMaxErrorRetry(count int) ClientOption {
 
 var _ Client = (*client)(nil)
 
-// serviceModeKeeper is for service mode switching
+// serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	svcModeMutex    sync.RWMutex
+	// RMutex here is for the future usage that there might be multiple goroutines
+	// triggering service mode switching concurrently.
+	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
-	tsoClient       atomic.Value
+	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
+}
+
+func (k *serviceModeKeeper) close() {
+	k.Lock()
+	defer k.Unlock()
+	switch k.serviceMode {
+	case pdpb.ServiceMode_API_SVC_MODE:
+		k.tsoSvcDiscovery.Close()
+		fallthrough
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		if k.tsoClient != nil {
+			k.tsoClient.Close()
+		}
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+	}
 }
 
 type client struct {
@@ -253,6 +280,8 @@ type client struct {
 	svrUrls         []string
 	pdSvcDiscovery  ServiceDiscovery
 	tokenDispatcher *tokenDispatcher
+
+	// For service mode switching.
 	serviceModeKeeper
 
 	// For internal usage.
@@ -278,19 +307,38 @@ type SecurityOption struct {
 }
 
 // NewClient creates a PD client.
-func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+func NewClient(
+	svrAddrs []string, security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
-func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	return NewClientWithKeyspace(ctx, defaultKeyspaceID, svrAddrs, security, opts...)
+func NewClientWithContext(
+	ctx context.Context, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	return createClientWithKeyspace(ctx, nullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
-func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.Uint32("keyspace-id", keyspaceID))
+// And now, it's only for test purpose.
+func NewClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	if keyspaceID < defaultKeyspaceID || keyspaceID > maxKeyspaceID {
+		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
+			keyspaceID, defaultKeyspaceID, maxKeyspaceID)
+	}
+	return createClientWithKeyspace(ctx, keyspaceID, svrAddrs, security, opts...)
+}
 
+// createClientWithKeyspace creates a client with context and the specified keyspace id.
+func createClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -317,13 +365,161 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		opt(c)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode,
+		keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
 
 	return c, nil
+}
+
+// APIVersion is the API version the server and the client is using.
+// See more details in https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md#kvproto
+type APIVersion int
+
+// The API versions the client supports.
+// As for V1TTL, client won't use it and we just remove it.
+const (
+	V1 APIVersion = iota
+	_
+	V2
+)
+
+// APIContext is the context for API version.
+type APIContext interface {
+	GetAPIVersion() (apiVersion APIVersion)
+	GetKeyspaceName() (keyspaceName string)
+}
+
+type apiContextV1 struct{}
+
+// NewAPIContextV1 creates a API context for V1.
+func NewAPIContextV1() APIContext {
+	return &apiContextV1{}
+}
+
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+	return V1
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+	return ""
+}
+
+type apiContextV2 struct {
+	keyspaceName string
+}
+
+// NewAPIContextV2 creates a API context with the specified keyspace name for V2.
+func NewAPIContextV2(keyspaceName string) APIContext {
+	if len(keyspaceName) == 0 {
+		keyspaceName = defaultKeyspaceName
+	}
+	return &apiContextV2{keyspaceName: keyspaceName}
+}
+
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+	return V2
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
+	return apiCtx.keyspaceName
+}
+
+// NewClientWithAPIContext creates a client according to the API context.
+func NewClientWithAPIContext(
+	ctx context.Context, apiCtx APIContext, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
+	switch apiVersion {
+	case V1:
+		return NewClientWithContext(ctx, svrAddrs, security, opts...)
+	case V2:
+		return newClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
+	default:
+		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
+	}
+}
+
+// newClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func newClientWithKeyspaceName(
+	ctx context.Context, keyspaceName string, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	log.Info("[pd] create pd client with endpoints and keyspace",
+		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
+
+	tlsCfg := &tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}
+
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		updateTokenConnectionCh: make(chan struct{}, 1),
+		ctx:                     clientCtx,
+		cancel:                  clientCancel,
+		svrUrls:                 addrsToUrls(svrAddrs),
+		tlsCfg:                  tlsCfg,
+		option:                  newOption(),
+	}
+
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// finally update the keyspace id to the PD service discovery for the following interactions.
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
+	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
+		return nil, err
+	}
+	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
+
+	return c, nil
+}
+
+func (c *client) initRetry(f func(s string) error, str string) error {
+	var err error
+	for i := 0; i < c.option.maxRetryTimes; i++ {
+		if err = f(str); err == nil {
+			return nil
+		}
+		select {
+		case <-c.ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
+	return errors.WithStack(err)
+}
+
+func (c *client) loadKeyspaceMeta(keyspace string) error {
+	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
+	if err != nil {
+		return err
+	}
+	c.keyspaceID = keyspaceMeta.GetId()
+	return nil
 }
 
 func (c *client) setup() error {
@@ -348,12 +544,7 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	if tsoClient := c.getTSOClient(); tsoClient != nil {
-		tsoClient.Close()
-	}
-	if c.tsoSvcDiscovery != nil {
-		c.tsoSvcDiscovery.Close()
-	}
+	c.serviceModeKeeper.close()
 	c.pdSvcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
@@ -364,64 +555,69 @@ func (c *client) Close() {
 }
 
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
-	c.svcModeMutex.Lock()
-	defer c.svcModeMutex.Unlock()
+	c.Lock()
+	defer c.Unlock()
 
 	if newMode == c.serviceMode {
 		return
 	}
-
-	log.Info("changing service mode", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
-		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
-
-	if newMode == pdpb.ServiceMode_UNKNOWN_SVC_MODE {
-		log.Warn("intend to switch to unknown service mode. do nothing")
-		return
-	}
-
-	var newTSOCli *tsoClient
-	tsoSvcDiscovery := c.tsoSvcDiscovery
-	ctx, cancel := context.WithCancel(c.ctx)
-
-	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
-		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
-			c.pdSvcDiscovery, c.pdSvcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
-		newTSOCli.Setup()
-	} else {
-		tsoSvcDiscovery = newTSOServiceDiscovery(ctx, cancel, MetaStorageClient(c),
-			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
-		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
-			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
-		if err := tsoSvcDiscovery.Init(); err != nil {
-			cancel()
-			log.Error("failed to initialize tso service discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]), zap.Error(err))
+	log.Info("[pd] changing service mode",
+		zap.String("old-mode", c.serviceMode.String()),
+		zap.String("new-mode", newMode.String()))
+	// Re-create a new TSO client.
+	var (
+		newTSOCli          *tsoClient
+		newTSOSvcDiscovery ServiceDiscovery
+	)
+	switch newMode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
+	case pdpb.ServiceMode_API_SVC_MODE:
+		newTSOSvcDiscovery = newTSOServiceDiscovery(
+			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
+			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
+		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
+		// and will be updated later.
+		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
+		if err := newTSOSvcDiscovery.Init(); err != nil {
+			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
+				zap.Strings("svr-urls", c.svrUrls),
+				zap.String("current-mode", c.serviceMode.String()),
+				zap.Error(err))
 			return
 		}
-		newTSOCli.Setup()
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		log.Warn("[pd] intend to switch to unknown service mode, just return")
+		return
 	}
-
-	// cleanup the old tso client
-	if oldTSOCli := c.getTSOClient(); oldTSOCli != nil {
-		oldTSOCli.Close()
+	newTSOCli.Setup()
+	// Replace the old TSO client.
+	oldTSOClient := c.tsoClient
+	c.tsoClient = newTSOCli
+	oldTSOClient.Close()
+	// Replace the old TSO service discovery if needed.
+	oldTSOSvcDiscovery := c.tsoSvcDiscovery
+	if newTSOSvcDiscovery != nil {
+		c.tsoSvcDiscovery = newTSOSvcDiscovery
+		// Close the old TSO service discovery safely after both the old client
+		// and service discovery are replaced.
+		if oldTSOSvcDiscovery != nil {
+			oldTSOSvcDiscovery.Close()
+		}
 	}
-	if c.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
-		c.tsoSvcDiscovery.Close()
-	}
-
-	c.tsoSvcDiscovery = tsoSvcDiscovery
-	c.tsoClient.Store(newTSOCli)
-
-	log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
-		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
+	oldMode := c.serviceMode
 	c.serviceMode = newMode
+	log.Info("[pd] service mode changed",
+		zap.String("old-mode", oldMode.String()),
+		zap.String("new-mode", newMode.String()))
 }
 
-func (c *client) getTSOClient() *tsoClient {
-	if tsoCli := c.tsoClient.Load(); tsoCli != nil {
-		return tsoCli.(*tsoClient)
-	}
-	return nil
+func (c *client) getServiceClientProxy() (*tsoClient, pdpb.ServiceMode) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.tsoClient, c.serviceMode
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -586,13 +782,12 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
+	tsoClient, _ := c.getServiceClientProxy()
 	req.start = time.Now()
-	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
 	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO
+		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 		return req
 	}
 
@@ -614,6 +809,26 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	resp := c.GetLocalTSAsync(ctx, dcLocation)
 	return resp.Wait()
+}
+
+func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+	tsoClient, serviceMode := c.getServiceClientProxy()
+	if tsoClient == nil {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("tso client is nil")
+	}
+
+	switch serviceMode {
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		// If the service mode is switched to API during GetTS() call, which happens during migration,
+		// returning the default timeline should be fine.
+		return c.GetTS(ctx)
+	case pdpb.ServiceMode_API_SVC_MODE:
+		return tsoClient.getMinTS(ctx)
+	default:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
+	}
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
@@ -1154,7 +1369,9 @@ func IsLeaderChange(err error) bool {
 		return true
 	}
 	errMsg := err.Error()
-	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
+	return strings.Contains(errMsg, errs.NotLeaderErr) ||
+		strings.Contains(errMsg, errs.MismatchLeaderErr) ||
+		strings.Contains(errMsg, errs.NotServedErr)
 }
 
 func trimHTTPPrefix(str string) string {
@@ -1305,7 +1522,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient := c.getTSOClient()
+	tsoClient, _ := c.getServiceClientProxy()
 	if tsoClient == nil {
 		return nil
 	}

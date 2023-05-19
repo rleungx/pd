@@ -47,15 +47,13 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/types"
@@ -69,26 +67,26 @@ const (
 	// pdRootPath is the old path for storing the tso related root path.
 	pdRootPath        = "/pd"
 	msServiceRootPath = "/ms"
-	// tsoSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
-	// This key prefix is in the format of "/ms/<cluster-id>/tso/<group-id>", and the entire key
-	// is in the format of "/ms/<cluster-id>/tso/<group-id>/primary". The <group-id> is 5 digits
-	// integer with leading zeros.
-	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName + "/%05d"
-	// maxRetryTimes is the max retry times for initializing the cluster ID.
-	maxRetryTimes = 180
-	// retryInterval is the interval to retry.
-	retryInterval = 1 * time.Second
+	// tsoSvcRootPathFormat defines the root path for all etcd paths used for different purposes.
+	// format: "/ms/{cluster_id}/tso".
+	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
+
+	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
+	maxRetryTimesWaitAPIService = 360
+	// retryIntervalWaitAPIService is the interval to retry.
+	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
+	retryIntervalWaitAPIService = 500 * time.Millisecond
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.Member = (*member.Participant)(nil)
+var _ tso.ElectionMember = (*member.Participant)(nil)
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
-	// Server state. 0 is not serving, 1 is serving.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 	// Server start timestamp
 	startTimestamp int64
 
@@ -99,34 +97,35 @@ type Server struct {
 
 	handler *Handler
 
-	cfg                  *Config
-	clusterID            uint64
-	defaultGroupRootPath string
-	defaultGroupStorage  endpoint.TSOStorage
-	listenURL            *url.URL
-	backendUrls          []url.URL
+	cfg         *Config
+	clusterID   uint64
+	listenURL   *url.URL
+	backendUrls []url.URL
 
-	// for the primary election in the TSO cluster
-	participant *member.Participant
 	// etcd client
 	etcdClient *clientv3.Client
 	// http client
 	httpClient *http.Client
 
-	muxListener         net.Listener
-	service             *Service
-	tsoAllocatorManager *tso.AllocatorManager
+	muxListener          net.Listener
+	service              *Service
+	keyspaceGroupManager *tso.KeyspaceGroupManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// Store as map[string]chan *tsoRequest
-	tsoDispatcher sync.Map
+	// tsoDispatcher is used to dispatch the TSO requests to
+	// the corresponding forwarding TSO channels.
+	tsoDispatcher *tsoutil.TSODispatcher
+	// tsoProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the tso grpc protocol
+	tsoProtoFactory *tsoutil.TSOProtoFactory
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
-	// primaryCallbacks will be called after the server becomes the primary.
-	primaryCallbacks []func(context.Context)
-	serviceRegister  *discovery.ServiceRegister
+
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
+	serviceRegister *discovery.ServiceRegister
 }
 
 // Implement the following methods defined in bs.Server
@@ -163,7 +162,7 @@ func (s *Server) Run() error {
 		skipWaitAPIServiceReady = true
 	})
 	if !skipWaitAPIServiceReady {
-		if err := s.waitAPIServiceReady(s.ctx); err != nil {
+		if err := s.waitAPIServiceReady(); err != nil {
 			return err
 		}
 	}
@@ -175,145 +174,19 @@ func (s *Server) Run() error {
 	if err := s.initClient(); err != nil {
 		return err
 	}
-	if err := s.startServer(); err != nil {
-		return err
-	}
-
-	s.startServerLoop()
-
-	return nil
-}
-
-func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
-	go s.primaryElectionLoop()
-	go s.tsoAllocatorLoop()
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-func (s *Server) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx)
-	log.Info("tso server is closed, exit allocator loop")
-}
-
-func (s *Server) primaryElectionLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit tso primary election loop")
-			return
-		}
-
-		primary, rev, checkAgain := s.participant.CheckLeader()
-		if checkAgain {
-			continue
-		}
-		if primary != nil {
-			// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
-			// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-
-			log.Info("start to watch the primary/leader", zap.Stringer("tso-primary", primary))
-			// WatchLeader will keep looping and never return unless the primary/leader has changed.
-			s.participant.WatchLeader(s.serverLoopCtx, primary, rev)
-			log.Info("the tso primary/leader has changed, try to re-campaign a primary/leader")
-		}
-
-		s.campaignLeader()
-	}
-}
-
-func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
-		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign tso primary/leader meets error due to txn conflict, another tso server may campaign successfully",
-				zap.String("campaign-tso-primary-name", s.participant.Name()))
-		} else {
-			log.Error("campaign tso primary/leader meets error due to etcd error",
-				zap.String("campaign-tso-primary-name", s.participant.Name()),
-				errs.ZapError(err))
-		}
-		return
-	}
-
-	// Start keepalive the leadership and enable TSO service.
-	// TSO service is strictly enabled/disabled by the leader lease for 2 reasons:
-	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
-	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
-		cancel()
-		s.participant.ResetLeader()
-	})
-
-	// maintain the the leadership, after this, TSO can be service.
-	s.participant.KeepLeader(ctx)
-	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Name()))
-
-	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global tso allocator", errs.ZapError(err))
-		return
-	}
-	log.Info("initializing the global tso allocator")
-	if err := allocator.Initialize(0); err != nil {
-		log.Error("failed to initialize the global tso allocator", errs.ZapError(err))
-		return
-	}
-	defer func() {
-		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-	}()
-
-	log.Info("triggering the primary callback functions")
-	for _, cb := range s.primaryCallbacks {
-		cb(ctx)
-	}
-
-	s.participant.EnableLeader()
-	defer resetLeaderOnce.Do(func() {
-		cancel()
-		s.participant.ResetLeader()
-	})
-
-	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
-	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
-
-	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
-	defer leaderTicker.Stop()
-
-	for {
-		select {
-		case <-leaderTicker.C:
-			if !s.participant.IsLeader() {
-				log.Info("no longer a primary/leader because lease has expired, the tso primary/leader will step down")
-				return
-			}
-		case <-ctx.Done():
-			// Server is closed and it should return nil.
-			log.Info("server is closed")
-			return
-		}
-	}
+	return s.startServer()
 }
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
 
 	log.Info("closing tso server ...")
+	// close tso service loops in the keyspace group manager
+	s.keyspaceGroupManager.Close()
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopCancel()
@@ -349,23 +222,62 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return atomic.LoadInt64(&s.isServing) == 1 && s.participant.IsLeader()
+	return s.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+}
+
+// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
+// TODO: update basicserver interface to support keyspace.
+func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
+	if atomic.LoadInt64(&s.isRunning) == 0 {
+		return false
+	}
+
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		keyspaceID, keyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return false
+	}
+	return member.IsLeader()
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
-	return s.participant.GetLeaderListenUrls()
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return nil
+	}
+
+	return member.GetLeaderListenUrls()
 }
 
-// GetMemberName returns the name of the member in election group.
-func (s *Server) GetMemberName() string {
-	return s.participant.Name()
+// GetMember returns the election member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	if err != nil {
+		return nil, err
+	}
+	return member, nil
 }
 
-// AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
+// ResignPrimary resigns the primary of the given keyspace.
+func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
+	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	if err != nil {
+		return err
+	}
+	member.ResetLeader()
+	return nil
+}
+
+// AddServiceReadyCallback implements basicserver.
+// It adds callbacks when it's ready for providing tso service.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
-	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
+	// Do nothing here. The primary of each keyspace group assigned to this host
+	// will respond to the requests accordingly.
 }
 
 // Implement the other methods
@@ -377,17 +289,17 @@ func (s *Server) ClusterID() uint64 {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isRunning) == 0
+}
+
+// GetKeyspaceGroupManager returns the manager of keyspace group.
+func (s *Server) GetKeyspaceGroupManager() *tso.KeyspaceGroupManager {
+	return s.keyspaceGroupManager
 }
 
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.tsoAllocatorManager
-}
-
-// GetTSODispatcher gets the TSO Dispatcher
-func (s *Server) GetTSODispatcher() *sync.Map {
-	return &s.tsoDispatcher
+func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
+	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
@@ -397,16 +309,6 @@ func (s *Server) IsLocalRequest(forwardedHost string) bool {
 	// uses the embedded etcd, check against ClientUrls; otherwise check
 	// against the cluster membership.
 	return forwardedHost == ""
-}
-
-// CreateTsoForwardStream creates the forward stream
-func (s *Server) CreateTsoForwardStream(client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.CancelFunc, error) {
-	done := make(chan struct{})
-	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
-	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
-	done <- struct{}{}
-	return forwardStream, cancel, err
 }
 
 // GetDelegateClient returns grpc client connection talking to the forwarded host
@@ -459,18 +361,6 @@ func (s *Server) GetExternalTS() uint64 {
 // TODO: Implement SetExternalTS
 func (s *Server) SetExternalTS(externalTS uint64) error {
 	return nil
-}
-
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	select {
-	case <-done:
-		return
-	case <-time.After(3 * time.Second):
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
 }
 
 // GetConfig gets the config.
@@ -588,29 +478,24 @@ func (s *Server) startServer() (err error) {
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
-	s.defaultGroupRootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 
 	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}
 
-	uniqueName := s.cfg.AdvertiseListenAddr
-	uniqueID := memberutil.GenerateUniqueID(uniqueName)
-	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+	// Initialize the TSO service.
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
+	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+	if err := s.keyspaceGroupManager.Initialize(); err != nil {
+		return err
+	}
 
-	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
-		"primary", "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
-	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
-	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(),
-		s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
-		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
-	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
-	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
-
+	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}
 
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
@@ -636,46 +521,50 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, mcsutils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+		mcsutils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to regiser the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
+		log.Error("failed to register the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
 		return err
 	}
 
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
 
-func (s *Server) waitAPIServiceReady(ctx context.Context) error {
-	for i := 0; i < maxRetryTimes; i++ {
-		ready, err := s.isAPIServiceReady(ctx)
-		if err != nil {
-			log.Warn("failed to check api server ready", errs.ZapError(err))
-		}
-		if ready {
+func (s *Server) waitAPIServiceReady() error {
+	var (
+		ready bool
+		err   error
+	)
+	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
+		ready, err = s.isAPIServiceReady()
+		if err == nil && ready {
 			return nil
 		}
+		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
 		select {
-		case <-ctx.Done():
+		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
-		case <-time.After(retryInterval):
-			log.Debug("api server is not ready, retrying")
+		case <-time.After(retryIntervalWaitAPIService):
 		}
 	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimes)
+	if err != nil {
+		log.Warn("failed to check api server ready", errs.ZapError(err))
+	}
+	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
 }
 
-func (s *Server) isAPIServiceReady(ctx context.Context) (bool, error) {
+func (s *Server) isAPIServiceReady() (bool, error) {
 	urls := strings.Split(s.cfg.BackendEndpoints, ",")
 	if len(urls) == 0 {
 		return false, errors.New("no backend endpoints")
 	}
-	cc, err := s.GetDelegateClient(s.ctx, urls[0]) // initClient has checked the backendUrls.
+	cc, err := s.GetDelegateClient(s.ctx, urls[0])
 	if err != nil {
 		return false, err
 	}
@@ -686,7 +575,11 @@ func (s *Server) isAPIServiceReady(ctx context.Context) (bool, error) {
 	if clusterInfo.GetHeader().GetError() != nil {
 		return false, errors.Errorf(clusterInfo.GetHeader().GetError().String())
 	}
-	if clusterInfo.ServiceModes[0] == pdpb.ServiceMode_API_SVC_MODE {
+	modes := clusterInfo.ServiceModes
+	if len(modes) == 0 {
+		return false, errors.New("no service mode")
+	}
+	if modes[0] == pdpb.ServiceMode_API_SVC_MODE {
 		return true, nil
 	}
 	return false, nil

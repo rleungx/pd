@@ -234,6 +234,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+	suite.NoError(err)
 	defer func() {
 		cancel()
 		svr.Close()
