@@ -45,7 +45,7 @@ type SplitRegionsHandler interface {
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
-func NewSplitRegionsHandler(cluster sche.ClusterInformer, oc *OperatorController) SplitRegionsHandler {
+func NewSplitRegionsHandler(cluster sche.ClusterInformer, oc *operator.Controller) SplitRegionsHandler {
 	return &splitRegionsHandler{
 		cluster: cluster,
 		oc:      oc,
@@ -180,7 +180,7 @@ func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 
 type splitRegionsHandler struct {
 	cluster sche.ClusterInformer
-	oc      *OperatorController
+	oc      *operator.Controller
 }
 
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
