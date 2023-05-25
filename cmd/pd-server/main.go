@@ -68,6 +68,8 @@ func NewServiceCommand() *cobra.Command {
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
 	cmd.AddCommand(NewAPIServiceCommand())
+	// TODO: once we support multiple services in deployment tools, we should remove it.
+	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
 }
 
@@ -112,6 +114,17 @@ func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "api",
 		Short: "Run the API service",
+		Run:   createAPIServerWrapper,
+	}
+	addFlags(cmd)
+	return cmd
+}
+
+// NewPDServiceCommand returns the pd service command.
+func NewPDServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pd",
+		Short: "Run the pd service",
 		Run:   createAPIServerWrapper,
 	}
 	addFlags(cmd)
@@ -186,7 +199,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	if len(services) != 0 {
+	if len(services) != 0 && services[0] != "pd" {
 		versioninfo.Log(server.APIServiceMode)
 	} else {
 		versioninfo.Log(server.PDMode)
