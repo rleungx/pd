@@ -227,7 +227,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	var mode string
-	if len(services) == 0 {
+	if len(services) == 0 || services[0] == "pd" {
 		mode = PDMode
 	} else {
 		mode = APIServiceMode
