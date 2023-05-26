@@ -1341,11 +1341,11 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		}, nil
 	}
 	// TODO: Deprecate it use `request.GetRegionsID`.
-	//nolint
+	// nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			//nolint
+			// nolint
 			return &pdpb.ScatterRegionResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 					"region %d not found"),
@@ -1496,34 +1496,6 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
-}
-
-// GetGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) GetGCSafePointV2(_ context.Context, _ *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
-}
-
-// WatchGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, server pdpb.PD_WatchGCSafePointV2Server) error {
-	return errors.New("not implemented")
-}
-
-// UpdateGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) UpdateGCSafePointV2(_ context.Context, _ *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
-}
-
-// UpdateServiceSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) UpdateServiceSafePointV2(_ context.Context, _ *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
 }
 
 // GetOperator gets information about the operator belonging to the specify region.

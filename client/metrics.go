@@ -103,6 +103,8 @@ var (
 	cmdDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
 	cmdDurationGet                      = cmdDuration.WithLabelValues("get")
 	cmdDurationPut                      = cmdDuration.WithLabelValues("put")
+	cmdDurationUpdateGCSafePointV2      = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
+	cmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
@@ -116,9 +118,13 @@ var (
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	cmdFailedDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
 	cmdFailedDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
-	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
-	cmdFailedDurationGet                      = cmdFailedDuration.WithLabelValues("get")
-	cmdFailedDurationPut                      = cmdFailedDuration.WithLabelValues("put")
+
+	cmdFailedDurationUpdateGCSafePointV2      = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
+	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+
+	requestDurationTSO   = requestDuration.WithLabelValues("tso")
+	cmdFailedDurationGet = cmdFailedDuration.WithLabelValues("get")
+	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 )
 
 func init() {
