@@ -1091,6 +1091,8 @@ type PDServerConfig struct {
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+
+	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {

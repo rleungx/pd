@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -122,6 +123,14 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 
 	hasGCWorker := false
 	min := &ServiceSafePointV2{KeyspaceID: keyspaceID, SafePoint: math.MaxUint64}
+
+	// Load global service safe point
+	serviceSafePointV1, err := se.loadServiceGCSafePointV1(NativeBRServiceID)
+	if serviceSafePointV1 != nil {
+		min.KeyspaceID = utils.NullKeyspaceID
+		min.SafePoint = serviceSafePointV1.SafePoint
+	}
+
 	for i, key := range keys {
 		serviceSafePoint := &ServiceSafePointV2{}
 		if err = json.Unmarshal([]byte(values[i]), serviceSafePoint); err != nil {
@@ -179,11 +188,54 @@ func (se *StorageEndpoint) LoadServiceSafePointV2(keyspaceID uint32, serviceID s
 	return serviceSafePoint, nil
 }
 
+// LoadGCSafePoint loads current GC safe point from storage.
+func (se *StorageEndpoint) loadServiceGCSafePointV1(serviceID string) (*ServiceSafePoint, error) {
+	serviceIDPath := GCSafePointServicePrefixPath() + serviceID
+	value, err := se.Load(serviceIDPath)
+	if err != nil || value == "" {
+		return nil, err
+	}
+
+	ssp := &ServiceSafePoint{}
+	if err := json.Unmarshal([]byte(value), ssp); err != nil {
+		return nil, err
+	}
+
+	return ssp, nil
+}
+
 func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32, initialValue uint64) (*ServiceSafePointV2, error) {
+
+	// Try to load GC worker Service safe point v2.
+	GCWorkerServiceSafePointV2, err := se.LoadServiceSafePointV2(keyspaceID, GCWorkerServiceSafePointID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If gc worker service safe point v2 not exist, load it from gc worker service safe point v1.
+	var expectGCWorkerSSP uint64
+	if GCWorkerServiceSafePointV2 == nil {
+		// Load service safe point from v1.
+		gCWorkerSSPV1, err := se.loadServiceGCSafePointV1(GCWorkerServiceSafePointID)
+		if err != nil {
+			return nil, err
+		}
+		if gCWorkerSSPV1 != nil {
+			expectGCWorkerSSP = gCWorkerSSPV1.SafePoint
+			log.Info("Gc worker service safe point v1 exists.", zap.Uint64("expect-gc-worker-ssp", expectGCWorkerSSP))
+		} else {
+			expectGCWorkerSSP = initialValue
+			log.Info("Gc worker service safe point v1 not exists.", zap.Uint64("expect-gc-worker-ssp", expectGCWorkerSSP))
+		}
+	} else {
+		expectGCWorkerSSP = initialValue
+		log.Debug("Gc worker service safe point v2 exists.", zap.Uint64("expect-gc-worker-ssp", expectGCWorkerSSP))
+	}
+
 	ssp := &ServiceSafePointV2{
 		KeyspaceID: keyspaceID,
 		ServiceID:  GCWorkerServiceSafePointID,
-		SafePoint:  initialValue,
+		SafePoint:  expectGCWorkerSSP,
 		ExpiredAt:  math.MaxInt64,
 	}
 	if err := se.SaveServiceSafePointV2(ssp); err != nil {
