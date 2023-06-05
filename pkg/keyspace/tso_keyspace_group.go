@@ -165,6 +165,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		ticker = time.NewTicker(time.Millisecond * 100)
 	})
 	defer ticker.Stop()
+	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
 		case <-ctx.Done():
@@ -181,6 +182,10 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			log.Error("failed to load all keyspace groups", zap.Error(err))
 			continue
 		}
+		// if the default keyspace is not initialized, we should wait for the default keyspace to be initialized.
+		if len(groups) == 0 {
+			continue
+		}
 		withError := false
 		for _, group := range groups {
 			if len(group.Members) < utils.DefaultKeyspaceGroupReplicaCount {
@@ -195,6 +200,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		}
 		if !withError {
 			// all keyspace groups have equal or more than default replica count
+			log.Info("all keyspace groups have equal or more than default replica count, stop to alloc node")
 			return
 		}
 	}
@@ -202,7 +208,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID uint64) {
 	tsoServiceKey := discovery.TSOPath(clusterID)
-	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(tsoServiceKey) + "/"
+	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(tsoServiceKey)
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
