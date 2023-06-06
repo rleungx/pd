@@ -90,22 +90,23 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
-	opController := operator.NewController(ctx, cluster, hbStreams)
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetPersistOptions(), hbStreams)
 	schedulers := make(map[string]*scheduleController)
-	return &Coordinator{
-		ctx:               ctx,
-		cancel:            cancel,
-		cluster:           cluster,
-		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.GetOpts(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer:   NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:    NewRegionSplitter(cluster, NewSplitRegionsHandler(cluster, opController)),
-		schedulers:        schedulers,
-		opController:      opController,
-		hbStreams:         hbStreams,
-		pluginInterface:   NewPluginInterface(),
-		diagnosticManager: newDiagnosticManager(cluster),
+	c := &Coordinator{
+		ctx:             ctx,
+		cancel:          cancel,
+		cluster:         cluster,
+		prepareChecker:  newPrepareChecker(),
+		checkers:        checker.NewController(ctx, cluster, cluster.GetOpts(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
+		regionScatterer: NewRegionScatterer(ctx, cluster, opController),
+		regionSplitter:  NewRegionSplitter(cluster, NewSplitRegionsHandler(cluster, opController)),
+		schedulers:      schedulers,
+		opController:    opController,
+		hbStreams:       hbStreams,
+		pluginInterface: NewPluginInterface(),
 	}
+	c.diagnosticManager = newDiagnosticManager(c, cluster.GetPersistOptions())
+	return c
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
@@ -305,7 +306,7 @@ func (c *Coordinator) drivePushOperator() {
 			log.Info("drive push operator has been stopped")
 			return
 		case <-ticker.C:
-			c.opController.PushOperators()
+			c.opController.PushOperators(c.RecordOpStepWithTTL)
 		}
 	}
 }
@@ -382,7 +383,7 @@ func (c *Coordinator) Run() {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)))
+		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -403,7 +404,7 @@ func (c *Coordinator) Run() {
 			continue
 		}
 
-		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
+		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args), c.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
@@ -452,7 +453,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
+	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()), c.RemoveScheduler)
 	if err != nil {
 		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), errs.ZapError(err))
 		return
@@ -724,7 +725,7 @@ func (c *Coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		decoder := schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedulers.CreateScheduler(schedulerCfg.Type, operator.NewController(c.ctx, nil, nil), storage.NewStorageWithMemoryBackend(), decoder)
+		tmp, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, storage.NewStorageWithMemoryBackend(), decoder, c.RemoveScheduler)
 		if err != nil {
 			return err
 		}
@@ -943,6 +944,11 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 // GetDiagnosticResult returns the diagnostic result.
 func (c *Coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error) {
 	return c.diagnosticManager.getDiagnosticResult(name)
+}
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
+	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
 }
 
 // scheduleController is used to manage a scheduler to schedulers.
