@@ -18,12 +18,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
@@ -81,4 +85,56 @@ func TestKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint32(2), keyspaceGroup.ID)
 	re.Equal(keyspaceGroup.Keyspaces, []uint32{222, 333})
+}
+
+func TestSplitKeyspaceGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	keyspaces := make([]string, 0)
+	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
+	for i := 0; i < 129; i++ {
+		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
+	}
+	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Keyspace.PreAlloc = keyspaces
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+	re.NoError(err)
+	defer ttc.Destroy()
+	cmd := pdctlCmd.GetRootCmd()
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	// split keyspace group.
+	testutil.Eventually(re, func() bool {
+		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		return strings.Contains(string(output), "Success")
+	})
+
+	// get all keyspaces
+	args := []string{"-u", pdAddr, "keyspace-group"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	strings.Contains(string(output), "Success")
+	var keyspaceGroups []*endpoint.KeyspaceGroup
+	err = json.Unmarshal(output, &keyspaceGroups)
+	re.NoError(err)
+	re.Len(keyspaceGroups, 2)
+	re.Equal(keyspaceGroups[0].ID, uint32(0))
+	re.Equal(keyspaceGroups[1].ID, uint32(1))
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
