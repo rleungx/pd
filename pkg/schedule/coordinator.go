@@ -146,7 +146,7 @@ func (c *Coordinator) PatrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if allowed, _ := c.cluster.CheckSchedulingAllowance(); !allowed {
+		if c.isSchedulingHalted() {
 			continue
 		}
 
@@ -171,6 +171,10 @@ func (c *Coordinator) PatrolRegions() {
 			failpoint.Break()
 		})
 	}
+}
+
+func (c *Coordinator) isSchedulingHalted() bool {
+	return c.cluster.GetPersistOptions().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -579,7 +583,7 @@ func (c *Coordinator) CollectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if allowed, _ := s.cluster.CheckSchedulingAllowance(); !s.IsPaused() && allowed {
+		if !s.IsPaused() && !c.isSchedulingHalted() {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
@@ -1054,8 +1058,7 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	allowed, _ := s.cluster.CheckSchedulingAllowance()
-	if !allowed {
+	if s.isSchedulingHalted() {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromStatus(halted)
 		}
@@ -1068,6 +1071,10 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 		return false
 	}
 	return true
+}
+
+func (s *scheduleController) isSchedulingHalted() bool {
+	return s.cluster.GetPersistOptions().IsSchedulingHalted()
 }
 
 // isPaused returns if a scheduler is paused.
