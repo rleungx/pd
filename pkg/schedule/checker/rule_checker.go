@@ -403,13 +403,12 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	strategy := c.strategy(region, rf.Rule, isWitness)
-	ruleStores := c.getRuleFitStores(rf)
-	oldStore := strategy.SelectStoreToRemove(ruleStores)
+	regionStores := c.cluster.GetRegionStores(region)
+	oldStore := strategy.SelectStoreToRemove(regionStores)
 	if oldStore == 0 {
 		return nil, nil
 	}
 	var coLocationStores []*core.StoreInfo
-	regionStores := c.cluster.GetRegionStores(region)
 	for _, s := range regionStores {
 		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
 			coLocationStores = append(coLocationStores, s)
