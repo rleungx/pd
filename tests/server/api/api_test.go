@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -649,6 +650,32 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 	suite.NotEqual(http.StatusOK, resp1.StatusCode)
 	_, err = io.ReadAll(resp1.Body)
 	suite.NoError(err)
+}
+
+func (suite *redirectorTestSuite) TestXForwardedFor() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leader.BootstrapCluster())
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	defer os.Remove(tempStdoutFile.Name())
+	cfg := &log.Config{}
+	cfg.File.Filename = tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	addr := follower.GetAddr() + "/pd/api/v1/regions"
+	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	suite.NoError(err)
+	resp, err := dialClient.Do(request)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	suite.Equal(http.StatusOK, resp.StatusCode)
+	time.Sleep(1 * time.Second)
+	b, _ := os.ReadFile(tempStdoutFile.Name())
+	l := string(b)
+	suite.Contains(l, "/pd/api/v1/regions")
+	suite.NotContains(l, suite.cluster.GetConfig().GetClientURLs())
 }
 
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {
