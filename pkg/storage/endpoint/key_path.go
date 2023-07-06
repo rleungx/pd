@@ -50,8 +50,10 @@ const (
 	resourceGroupStatesPath   = "states"
 	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
-	tsoServiceKey = utils.TSOServiceName
-	timestampKey  = "timestamp"
+	tsoServiceKey                = utils.TSOServiceName
+	globalTSOAllocatorEtcdPrefix = "gta"
+	// TimestampKey is the key of timestamp oracle used for the suffix.
+	TimestampKey = "timestamp"
 
 	tsoKeyspaceGroupPrefix     = tsoServiceKey + "/" + utils.KeyspaceGroupsKey
 	keyspaceGroupMembershipKey = "membership"
@@ -248,4 +250,35 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 // encodeKeyspaceGroupID from uint32 to string.
 func encodeKeyspaceGroupID(groupID uint32) string {
 	return fmt.Sprintf("%05d", groupID)
+}
+
+func buildPath(withSuffix bool, str ...string) string {
+	var sb strings.Builder
+	for i := 0; i < len(str); i++ {
+		if i != 0 {
+			sb.WriteString("/")
+		}
+		sb.WriteString(str[i])
+	}
+	if withSuffix {
+		sb.WriteString("/")
+	}
+	return sb.String()
+}
+
+// GetKeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
+//  1. for the default keyspace group:
+//     "" in /pd/{cluster_id}/timestamp
+//  2. for the non-default keyspace groups:
+//     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
+func GetKeyspaceGroupTSPath(groupID uint32) string {
+	if groupID == utils.DefaultKeyspaceGroupID {
+		return ""
+	}
+	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+}
+
+// GetTimestampPath returns the timestamp path for the given timestamp oracle path prefix.
+func GetTimestampPath(tsPath string) string {
+	return path.Join(tsPath, TimestampKey)
 }
