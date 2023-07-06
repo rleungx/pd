@@ -249,6 +249,28 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithMetricsLabels configures the client with metrics labels.
+func WithMetricsLabels(labels prometheus.Labels) ClientOption {
+	return func(c *client) {
+		c.option.metricsLabels = labels
+	}
+}
+
+// WithInitMetricsOption configures the client with metrics labels.
+func WithInitMetricsOption(initMetrics bool) ClientOption {
+	return func(c *client) {
+		c.option.initMetrics = initMetrics
+	}
+}
+
+// WithAllowTSOFallback configures the client with `allowTSOFallback` option.
+// NOTICE: This should only be used for testing.
+func WithAllowTSOFallback() ClientOption {
+	return func(c *client) {
+		c.option.allowTSOFallback = true
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
