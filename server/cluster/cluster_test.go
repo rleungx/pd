@@ -2440,7 +2440,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 	return tc, co, func() {
 		co.Stop()
-		co.GetSchedulersController().GetWaitGroup().Wait()
+		co.GetSchedulersController().Wait()
 		co.GetWaitGroup().Wait()
 		hbStreams.Close()
 		cancel()
@@ -2682,7 +2682,7 @@ func TestCheckCache(t *testing.T) {
 	re.Len(oc.GetOperators(), 1)
 	re.Empty(co.GetCheckerController().GetWaitingRegions())
 
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/break-patrol"))
 }
@@ -2935,7 +2935,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sc.GetSchedulerNames(), defaultCount-3)
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(storage))
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
@@ -2965,7 +2965,7 @@ func TestPersistScheduler(t *testing.T) {
 	sc = co.GetSchedulersController()
 	re.Len(sc.GetSchedulerNames(), 3)
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	// suppose restart PD again
 	_, newOpt, err = newTestScheduleConfig()
@@ -2993,7 +2993,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sc.GetSchedulerNames(), 4)
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
@@ -3050,7 +3050,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Empty(sc.GetSchedulerNames())
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 
 	// suppose restart PD again
@@ -3064,7 +3064,7 @@ func TestRemoveScheduler(t *testing.T) {
 	// the option remains default scheduler
 	re.Len(co.GetCluster().GetPersistOptions().GetSchedulers(), defaultCount)
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 }
 
@@ -3096,7 +3096,7 @@ func TestRestart(t *testing.T) {
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	region = waitPromoteLearner(re, stream, region, 2)
 	co.Stop()
-	co.GetSchedulersController().GetWaitGroup().Wait()
+	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 
 	// Recreate coordinator then add another replica on store 3.
