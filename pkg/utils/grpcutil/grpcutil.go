@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

@@ -38,7 +38,7 @@ require (
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072
-	github.com/spf13/cobra v1.0.0
+	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.2
 	github.com/swaggo/http-swagger v1.2.6
@@ -49,6 +49,7 @@ require (
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.etcd.io/etcd/api/v3 v3.5.9
+	go.etcd.io/etcd/client/pkg/v3 v3.5.9
 	go.etcd.io/etcd/client/v3 v3.5.9
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
@@ -60,10 +61,7 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-require (
-	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.5.9 // indirect
-)
+require github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
