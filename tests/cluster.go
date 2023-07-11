@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/dashboard"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -80,12 +79,17 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	return createTestServer(ctx, cfg, nil)
 }
 
+// NewTestServer creates a new TestServer.
+func NewTestServerWithBuilders(ctx context.Context, cfg *config.Config, builders ...server.HandlerBuilder) (*TestServer, error) {
+	return createTestServer(ctx, cfg, nil, builders...)
+}
+
 // NewTestAPIServer creates a new TestServer.
 func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
 	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
 }
 
-func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+func createTestServer(ctx context.Context, cfg *config.Config, services []string, builders ...server.HandlerBuilder) (*TestServer, error) {
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
@@ -98,7 +102,7 @@ func createTestServer(ctx context.Context, cfg *config.Config, services []string
 		return nil, err
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
-	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	serviceBuilders = append(serviceBuilders, builders...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err
@@ -442,15 +446,20 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, false, opts...)
+	return createTestCluster(ctx, initialServerCount, false, nil, opts...)
+}
+
+// NewTestClusterWithBuilders creates a new TestCluster.
+func NewTestClusterWithBuilders(ctx context.Context, initialServerCount int, builder []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, false, builder, opts...)
 }
 
 // NewTestAPICluster creates a new TestCluster with API service.
 func NewTestAPICluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, true, opts...)
+	return createTestCluster(ctx, initialServerCount, true, nil, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, builders []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -462,6 +471,8 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 		var s *TestServer
 		if isAPIServiceMode {
 			s, err = NewTestAPIServer(ctx, serverConf)
+		} else if len(builders) != 0 {
+			s, err = NewTestServerWithBuilders(ctx, serverConf, builders...)
 		} else {
 			s, err = NewTestServer(ctx, serverConf)
 		}

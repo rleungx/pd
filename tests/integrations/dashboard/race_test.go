@@ -31,7 +31,7 @@ func TestCancelDuringStarting(t *testing.T) {
 	defer cancel()
 
 	re := require.New(t)
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestClusterWithBuilders(ctx, 1, dashboard.GetServiceBuilders())
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())

@@ -122,7 +122,7 @@ func (suite *dashboardTestSuite) checkServiceIsStopped(servers map[string]*tests
 }
 
 func (suite *dashboardTestSuite) testDashboard(internalProxy bool) {
-	cluster, err := tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestClusterWithBuilders(suite.ctx, 3, dashboard.GetServiceBuilders(), func(conf *config.Config, serverName string) {
 		conf.Dashboard.InternalProxy = internalProxy
 	})
 	suite.NoError(err)

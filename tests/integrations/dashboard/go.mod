@@ -2,9 +2,9 @@ module github.com/tikv/pd/tests/dashboard
 
 go 1.20
 
-replace github.com/tikv/pd => ../../
+replace github.com/tikv/pd => ../../../
 
-replace github.com/tikv/pd/dashboard => ../../dashboard
+replace github.com/tikv/pd/dashboard => ../../../dashboard
 
 replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
