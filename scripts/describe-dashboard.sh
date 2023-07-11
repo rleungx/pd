@@ -9,6 +9,9 @@ if [ "${DASHBOARD-}" == "0" ]; then
   exit 0
 fi
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+BASE_DIR="$(dirname "$DIR")/dashboard"
+cd "${BASE_DIR}"
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 
 if [ "$1" = "git-hash" ]; then

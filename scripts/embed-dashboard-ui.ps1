@@ -40,6 +40,6 @@ echo '+ Unpack embedded asset from archive'
 Expand-Archive -Path "${CACHE_FILE}" -DestinationPath "$CACHE_DIR" -Force
 $MOVE_FILE="${CACHE_DIR}\embedded_assets_handler.go"
 gofmt -s -w "$MOVE_FILE"
-$MOVE_DEST="${BASE_DIR}\pkg\dashboard\uiserver"
+$MOVE_DEST="${BASE_DIR}\dashboard\uiserver"
 move-item -path "${MOVE_FILE}" -destination "${MOVE_DEST}" -Force
 echo "  - Unpacked ${MOVE_DEST}"

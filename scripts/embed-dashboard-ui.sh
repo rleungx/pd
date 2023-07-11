@@ -21,15 +21,14 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-BASE_DIR="$(dirname "$DIR")"
+BASE_DIR="$(dirname "$DIR")/dashboard"
 ASSET_FILE_NAME=embedded_assets_handler.go
-ASSET_DEST_PATH=${BASE_DIR}/pkg/dashboard/uiserver/${ASSET_FILE_NAME}
-
+ASSET_DEST_PATH=${BASE_DIR}/uiserver/${ASSET_FILE_NAME}
 
 echo '+ Clean up existing asset file'
 rm -f ASSET_DEST_PATH
 
-echo '+ Fetch TiDB Dashboard Go module'
+cd "${BASE_DIR}"
 go mod download
 go mod tidy
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
@@ -144,7 +143,7 @@ function compile_asset {
   echo '  - Generating...'
   NO_ASSET_BUILD_TAG=1 scripts/embed_ui_assets.sh
   echo '  - Writing...'
-  cp "pkg/uiserver/${ASSET_FILE_NAME}" "${ASSET_DEST_PATH}"
+  cp "uiserver/${ASSET_FILE_NAME}" "${ASSET_DEST_PATH}"
   cd -
   echo "  - Wrote ${ASSET_DEST_PATH}"
 

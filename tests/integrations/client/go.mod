@@ -5,6 +5,7 @@ go 1.20
 replace (
 	github.com/tikv/pd => ../../../
 	github.com/tikv/pd/client => ../../../client
+	github.com/tikv/pd/dashboard => ../../../dashboard
 )
 
 // reset grpc and protobuf deps in order to import client and server at the same time
@@ -144,6 +145,7 @@ require (
 	github.com/swaggo/http-swagger v1.2.6 // indirect
 	github.com/swaggo/swag v1.8.3 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965 // indirect
+	github.com/tikv/pd/dashboard v0.0.0-00010101000000-000000000000 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
 	github.com/tklauser/numcpus v0.6.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20200427203606-3cfed13b9966 // indirect

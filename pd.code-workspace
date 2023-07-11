@@ -9,6 +9,14 @@
 			"path": "client"
 		},
 		{
+			"name": "dashboard",
+			"path": "dashboard"
+		},
+		{
+			"name": "dashboard-tests",
+			"path": "tests/dashboard"
+		},
+		{
 			"name": "pd-client-tests",
 			"path": "tests/integrations/client"
 		},

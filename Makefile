@@ -120,8 +120,8 @@ dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
 
 dashboard-replace-distro-info:
-	rm -f pkg/dashboard/distro/distro_info.go
-	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go pkg/dashboard/distro/distro_info.go
+	rm -f dashboard/distro/distro_info.go
+	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go dashboard/distro/distro_info.go
 
 .PHONY: swagger-spec dashboard-ui dashboard-replace-distro-info
 

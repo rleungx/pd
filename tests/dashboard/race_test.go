@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/dashboard"
 	"github.com/tikv/pd/tests"
 )
 
