@@ -21,7 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/embed"
 	"go.uber.org/goleak"
 )

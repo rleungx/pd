@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/pkg/transport"
 )
 

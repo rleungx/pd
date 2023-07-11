@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

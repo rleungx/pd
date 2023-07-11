@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/embed"
 )
 

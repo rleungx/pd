@@ -48,6 +48,8 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
+	go.etcd.io/etcd/api/v3 v3.5.9
+	go.etcd.io/etcd/client/v3 v3.5.9
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
@@ -56,6 +58,11 @@ require (
 	golang.org/x/tools v0.6.0
 	google.golang.org/grpc v1.54.0
 	gotest.tools/gotestsum v1.7.0
+)
+
+require (
+	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.9 // indirect
 )
 
 require (
@@ -87,7 +94,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
-	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
+	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/fatih/color v1.10.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
