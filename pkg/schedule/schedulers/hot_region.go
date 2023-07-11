@@ -59,10 +59,12 @@ var (
 	hotSchedulerSnapshotSenderLimitCounter  = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
 
 	// counter related with the split region
-	hotSchedulerNotFoundSplitKeysCounter       = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
-	hotSchedulerRegionBucketsNotHotCounter     = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
-	hotSchedulerSplitSuccessCounter            = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
-	hotSchedulerNeedSplitBeforeScheduleCounter = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
+	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
+	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
+	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
+	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
+	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
+	hotSchedulerRegionTooHotNeedSplitCounter      = schedulerCounter.WithLabelValues(HotRegionName, "region_is_too_hot_need_split")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -159,21 +161,23 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 // It makes each dim rate or count become `weight` times to the origin value.
 func (h *baseHotScheduler) summaryPendingInfluence() {
 	for id, p := range h.regionPendings {
-		from := h.stInfos[p.from]
-		to := h.stInfos[p.to]
-		maxZombieDur := p.maxZombieDuration
-		weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
+		for _, from := range p.froms {
+			from := h.stInfos[from]
+			to := h.stInfos[p.to]
+			maxZombieDur := p.maxZombieDuration
+			weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
 
-		if needGC {
-			delete(h.regionPendings, id)
-			continue
-		}
+			if needGC {
+				delete(h.regionPendings, id)
+				continue
+			}
 
-		if from != nil && weight > 0 {
-			from.AddInfluence(&p.origin, -weight)
-		}
-		if to != nil && weight > 0 {
-			to.AddInfluence(&p.origin, weight)
+			if from != nil && weight > 0 {
+				from.AddInfluence(&p.origin, -weight)
+			}
+			if to != nil && weight > 0 {
+				to.AddInfluence(&p.origin, weight)
+			}
 		}
 	}
 	for storeID, info := range h.stInfos {
@@ -214,7 +218,8 @@ var (
 	// as it implies that this dimension is sufficiently uniform.
 	stddevThreshold = 0.1
 
-	splitBucket = "split-hot-region"
+	splitBucket          = "split-hot-region"
+	splitProgressiveRank = int64(-5)
 )
 
 type hotScheduler struct {
@@ -293,6 +298,7 @@ func (h *hotScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster)
 	}
 	return nil
 }
+
 func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
@@ -650,6 +656,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
+	splitThresholds := bs.sche.conf.getSplitThresholds()
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
@@ -663,6 +670,16 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
+			if tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
+				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
+				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true /*too hot need to split*/)
+				if len(ops) > 0 {
+					bs.ops = ops
+					bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
+					bs.best = bs.cur
+					return ops
+				}
+			}
 
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
@@ -1259,7 +1276,7 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
 func (bs *balanceSolver) betterThanV1(old *solution) bool {
-	if old == nil {
+	if old == nil || bs.cur.progressiveRank <= splitProgressiveRank {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
@@ -1451,7 +1468,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		}
 	}
 	if len(splitRegions) > 0 {
-		return bs.createSplitOperator(splitRegions)
+		return bs.createSplitOperator(splitRegions, false /* region is too big need split before move */)
 	}
 
 	srcStoreID := bs.cur.srcStore.GetID()
@@ -1491,7 +1508,8 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // createSplitOperator creates split operators for the given regions.
-func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*operator.Operator {
+// isTooHot true indicates that the region is too hot and needs split.
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHot bool) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
 	}
@@ -1508,6 +1526,11 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			hotSchedulerRegionBucketsNotHotCounter.Inc()
 			return
 		}
+		// skip if only one hot buckets exists on this region.
+		if len(stats) <= 1 && isTooHot {
+			hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
+			return
+		}
 		startKey, endKey := region.GetStartKey(), region.GetEndKey()
 		splitKey := make([][]byte, 0)
 		for _, stat := range stats {
@@ -1521,7 +1544,13 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 				// Otherwise, we should append the current start key and end key.
 				// E.g. [a, b), [c, d) -> [a, b), [c, d) split keys is [a,b,c,d]
 				if bytes.Equal(stat.StartKey, splitKey[len(splitKey)-1]) {
-					splitKey[len(splitKey)-1] = stat.EndKey
+					// If the region is too hot, we should split all the buckets to balance the load.
+					// otherwise, we should split the buckets that are too hot.
+					if isTooHot {
+						splitKey = append(splitKey, stat.EndKey)
+					} else {
+						splitKey[len(splitKey)-1] = stat.EndKey
+					}
 				} else {
 					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
 				}
@@ -1544,6 +1573,10 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 
 	for _, region := range regions {
 		createFunc(region)
+	}
+	// the split bucket's priority is highest
+	if len(operators) > 0 {
+		bs.cur.progressiveRank = splitProgressiveRank
 	}
 	return operators
 }
@@ -1803,4 +1836,11 @@ func dimToString(dim int) string {
 
 func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int) {
 	return stringToDim(priorities[0]), stringToDim(priorities[1])
+}
+
+// tooHotNeedSplit returns true if any dim of the hot region is greater than the store threshold.
+func tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
+	return slice.AnyOf(store.LoadPred.Current.Loads, func(i int) bool {
+		return region.Loads[i] > store.LoadPred.Current.Loads[i]*splitThresholds
+	})
 }

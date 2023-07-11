@@ -140,7 +140,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		op.Start()
 		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*utils.StoreHeartBeatReportInterval*time.Second))
 		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*utils.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, 2, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
+		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
@@ -2370,6 +2370,14 @@ func TestConfigValidation(t *testing.T) {
 	re.True(hc.IsForbidRWType(utils.Write))
 	// illegal
 	hc.ForbidRWType = "test"
+	err = hc.valid()
+	re.Error(err)
+
+	hc.SplitThresholds = 0
+	err = hc.valid()
+	re.Error(err)
+
+	hc.SplitThresholds = 1.1
 	err = hc.valid()
 	re.Error(err)
 }

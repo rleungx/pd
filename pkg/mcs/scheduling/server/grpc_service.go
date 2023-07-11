@@ -209,7 +209,7 @@ func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.Scat
 		return &schedulingpb.ScatterRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	opsCount, failures, err := c.GetRegionScatterer().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
+	opsCount, failures, err := c.GetRegionScatterer().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
 	if err != nil {
 		header := s.errorHeader(&schedulingpb.Error{
 			Type:    schedulingpb.ErrorType_UNKNOWN,
