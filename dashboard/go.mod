@@ -2,8 +2,6 @@ module github.com/tikv/pd/dashboard
 
 go 1.20
 
-replace google.golang.org/grpc v1.56.2 => google.golang.org/grpc v1.26.0
-
 require (
 	github.com/pingcap/kvproto v0.0.0-20230705080816-a48f4fe282a2
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
@@ -159,3 +157,7 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+replace google.golang.org/grpc => google.golang.org/grpc v1.26.0
+
+replace go.etcd.io/etcd => go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
