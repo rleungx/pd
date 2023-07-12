@@ -593,6 +593,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 	}
 }
 
+// runCoordinator runs the main scheduling loop.
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
