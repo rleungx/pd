@@ -23,7 +23,6 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/dashboard"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/errs"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
@@ -213,7 +212,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
-	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	// serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))

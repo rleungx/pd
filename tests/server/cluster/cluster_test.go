@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/dashboard"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/id"
@@ -612,7 +611,6 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1041,7 +1039,6 @@ func TestOfflineStoreLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1133,7 +1130,6 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1191,7 +1187,6 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()
