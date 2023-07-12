@@ -31,7 +31,7 @@ import (
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 
-	"google.golang.org/grpc/test/grpc_testing"
+	"google.golang.org/grpc/interop/grpc_testing"
 )
 
 func TestMain(m *testing.M) {

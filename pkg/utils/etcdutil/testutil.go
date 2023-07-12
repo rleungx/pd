@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/utils/tempurl"
-	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
