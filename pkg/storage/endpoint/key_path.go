@@ -25,7 +25,7 @@ import (
 )
 
 const (
-<<<<<<< HEAD
+	pdRootPath                 = "/pd"
 	clusterPath                = "raft"
 	configPath                 = "config"
 	serviceMiddlewarePath      = "service_middleware"
@@ -37,21 +37,6 @@ const (
 	replicationPath            = "replication_mode"
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
-=======
-	pdRootPath               = "/pd"
-	clusterPath              = "raft"
-	configPath               = "config"
-	serviceMiddlewarePath    = "service_middleware"
-	schedulePath             = "schedule"
-	gcPath                   = "gc"
-	rulesPath                = "rules"
-	ruleGroupPath            = "rule_group"
-	regionLabelPath          = "region_label"
-	replicationPath          = "replication_mode"
-	customScheduleConfigPath = "scheduler_config"
-	// GCWorkerServiceSafePointID is the service id of GC worker.
-	GCWorkerServiceSafePointID = "gc_worker"
->>>>>>> dbc936698... *: move keyspace group primary path code to key_path.go (#6755)
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
@@ -60,6 +45,8 @@ const (
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
+	gcSafePointInfix           = "gc_safe_point"
+	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
@@ -79,6 +66,11 @@ const (
 	keyLen = 20
 )
 
+// PDRootPath returns the PD root path.
+func PDRootPath(clusterID uint64) string {
+	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+}
+
 // AppendToRootPath appends the given key to the rootPath.
 func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
@@ -92,6 +84,11 @@ func ClusterRootPath(rootPath string) string {
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
 func ClusterBootstrapTimeKey() string {
 	return path.Join(clusterPath, "status", "raft_bootstrap_time")
+}
+
+// ConfigPath returns the path to save the PD config.
+func ConfigPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), configPath)
 }
 
 func scheduleConfigPath(scheduleName string) string {
@@ -222,7 +219,7 @@ func KeyspaceMetaPrefix() string {
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
 // Path: keyspaces/meta/{space_id}
 func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := encodeKeyspaceID(spaceID)
+	idStr := EncodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
 }
 
@@ -238,11 +235,11 @@ func KeyspaceIDAlloc() string {
 	return path.Join(keyspacePrefix, keyspaceAllocID)
 }
 
-// encodeKeyspaceID from uint32 to string.
+// EncodeKeyspaceID from uint32 to string.
 // It adds extra padding to make encoded ID ordered.
 // Encoded ID can be decoded directly with strconv.ParseUint.
 // Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-func encodeKeyspaceID(spaceID uint32) string {
+func EncodeKeyspaceID(spaceID uint32) string {
 	return fmt.Sprintf("%08d", spaceID)
 }
 
@@ -315,20 +312,6 @@ func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
 // encodeKeyspaceGroupID from uint32 to string.
 func encodeKeyspaceGroupID(groupID uint32) string {
 	return fmt.Sprintf("%05d", groupID)
-}
-
-func buildPath(withSuffix bool, str ...string) string {
-	var sb strings.Builder
-	for i := 0; i < len(str); i++ {
-		if i != 0 {
-			sb.WriteString("/")
-		}
-		sb.WriteString(str[i])
-	}
-	if withSuffix {
-		sb.WriteString("/")
-	}
-	return sb.String()
 }
 
 // KeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
