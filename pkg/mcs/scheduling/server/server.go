@@ -53,7 +53,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Server is the resource manager server, and it implements bs.Server.
+// Server is the scheduling server, and it implements bs.Server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 	// Server state. 0 is not running, 1 is running.
@@ -71,7 +71,7 @@ type Server struct {
 	name      string
 	listenURL *url.URL
 
-	// for the primary election of resource manager
+	// for the primary election of scheduling
 	participant *member.Participant
 	etcdClient  *clientv3.Client
 	httpClient  *http.Client
@@ -103,7 +103,7 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
-// Run runs the Resource Manager server.
+// Run runs the Scheduling server.
 func (s *Server) Run() (err error) {
 	if err = s.initClient(); err != nil {
 		return err
@@ -129,7 +129,7 @@ func (s *Server) primaryElectionLoop() {
 
 	for {
 		if s.IsClosed() {
-			log.Info("server is closed, exit resource manager primary election loop")
+			log.Info("server is closed, exit scheduling primary election loop")
 			return
 		}
 
@@ -138,10 +138,10 @@ func (s *Server) primaryElectionLoop() {
 			continue
 		}
 		if primary != nil {
-			log.Info("start to watch the primary", zap.Stringer("resource-manager-primary", primary))
+			log.Info("start to watch the primary", zap.Stringer("scheduling-primary", primary))
 			// Watch will keep looping and never return unless the primary/leader has changed.
 			primary.Watch(s.serverLoopCtx)
-			log.Info("the resource manager primary has changed, try to re-campaign a primary")
+			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
 
 		s.campaignLeader()
@@ -149,20 +149,20 @@ func (s *Server) primaryElectionLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
+	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
-				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
+			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
+				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 		} else {
-			log.Error("campaign resource manager primary meets error due to etcd error",
-				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
+			log.Error("campaign scheduling primary meets error due to etcd error",
+				zap.String("campaign-scheduling-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
 		return
 	}
 
-	// Start keepalive the leadership and enable Resource Manager service.
+	// Start keepalive the leadership and enable Scheduling service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
@@ -170,9 +170,9 @@ func (s *Server) campaignLeader() {
 		s.participant.ResetLeader()
 	})
 
-	// maintain the leadership, after this, Resource Manager could be ready to provide service.
+	// maintain the leadership, after this, Scheduling could be ready to provide service.
 	s.participant.KeepLeader(ctx)
-	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
+	log.Info("campaign scheduling primary ok", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
@@ -180,7 +180,7 @@ func (s *Server) campaignLeader() {
 	}
 
 	s.participant.EnableLeader()
-	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
+	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -189,7 +189,7 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !s.participant.IsLeader() {
-				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
+				log.Info("no longer a primary/leader because lease has expired, the scheduling primary/leader will step down")
 				return
 			}
 		case <-ctx.Done():
@@ -207,7 +207,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing resource manager server ...")
+	log.Info("closing scheduling server ...")
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopCancel()
@@ -223,12 +223,7 @@ func (s *Server) Close() {
 		s.httpClient.CloseIdleConnections()
 	}
 
-	log.Info("resource manager server is closed")
-}
-
-// GetControllerConfig returns the controller config.
-func (s *Server) GetControllerConfig() *ControllerConfig {
-	return &s.cfg.Controller
+	log.Info("scheduling server is closed")
 }
 
 // GetClient returns builtin etcd client.
@@ -365,22 +360,17 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
-	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
+	// The independent Scheduling service still reuses PD version info since PD and Scheduling are just
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	resourceManagerPrimaryPrefix := endpoint.ResourceManagerSvcRootPath(s.clusterID)
+	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)),
+	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
 		utils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
-	s.service = &Service{
-		ctx:     s.ctx,
-		manager: NewManager[*Server](s),
-	}
 
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -415,9 +405,9 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
-		utils.ResourceManagerServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+		utils.SchedulingServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", utils.ResourceManagerServiceName), errs.ZapError(err))
+		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
 		return err
 	}
 	atomic.StoreInt64(&s.isRunning, 1)
@@ -466,8 +456,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("Resource Manager")
-	log.Info("Resource Manager config", zap.Reflect("config", cfg))
+	versioninfo.Log("Scheduling")
+	log.Info("Scheduling config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)
