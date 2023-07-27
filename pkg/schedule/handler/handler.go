@@ -1211,7 +1211,7 @@ func (h *Handler) ScatterRegionsByID(ids []uint64, group string, retryLimit int,
 	if co == nil {
 		return 0, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	return co.GetRegionScatterer().ScatterRegionsByID(ids, group, retryLimit, false)
+	return co.GetRegionScatterer().ScatterRegionsByID(ids, group, retryLimit)
 }
 
 // SplitRegionsResponse is the response for split regions.

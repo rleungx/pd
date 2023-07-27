@@ -402,7 +402,7 @@ func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	if !s.IsAPIServiceMode() {
-		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+		return s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
