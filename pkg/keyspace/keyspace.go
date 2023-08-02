@@ -68,6 +68,8 @@ type Config interface {
 // Manager manages keyspace related data.
 // It validates requests and provides concurrency control.
 type Manager struct {
+	// ctx is the context of the manager, to be used in transaction.
+	ctx context.Context
 	// metaLock guards keyspace meta.
 	metaLock *syncutil.LockGroup
 	// idAllocator allocates keyspace id.
@@ -76,8 +78,6 @@ type Manager struct {
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
 	cluster schedule.Cluster
-	// ctx is the context of the manager, to be used in transaction.
-	ctx context.Context
 	// config is the configurations of the manager.
 	config Config
 	// kgm is the keyspace group manager of the server.
