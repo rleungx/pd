@@ -3,7 +3,10 @@ on:
   # Only run when the new code is merged into master.
   push:
     branches:
-      - master
+      - release-7.1-keyspace
+  pull_request:
+    branches:
+      - release-7.1-keyspace
 jobs:
   tso-consistency-test:
     runs-on: ubuntu-latest
