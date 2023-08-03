@@ -80,6 +80,15 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
+	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
+	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
+	// Set this to 0 will disable TSO Proxy.
+	// Set this to the negative value to disable the limit.
+	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// After the timeout, the TSO proxy will close the grpc TSO stream.
+	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
+
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
@@ -218,6 +227,9 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 
+	defaultMaxConcurrentTSOProxyStreamings = 5000
+	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
+
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
@@ -238,6 +250,11 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
+
+	defaultWaitRegionSplitTimeout   = 30 * time.Second
+	defaultCheckRegionSplitInterval = 50 * time.Millisecond
+	minCheckRegionSplitInterval     = 1 * time.Millisecond
+	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 )
 
 // Special keys for Labels
@@ -436,10 +453,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
+	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
+
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
-
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
@@ -495,6 +513,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
 	c.Security.Encryption.Adjust()
 
@@ -1236,6 +1256,17 @@ func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
 }
 
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {
+	return c.MaxConcurrentTSOProxyStreamings
+}
+
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (c *Config) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return c.TSOProxyRecvFromClientTimeout.Duration
+}
+
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
 	return c.TSOUpdatePhysicalInterval.Duration
@@ -1399,9 +1430,62 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+	// WaitRegionSplit indicates whether to wait for the region split to complete
+	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
+	// WaitRegionSplitTimeout indicates the max duration to wait region split.
+	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
+	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
+	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+}
+
+// Validate checks if keyspace config falls within acceptable range.
+func (c *KeyspaceConfig) Validate() error {
+	if c.CheckRegionSplitInterval.Duration > maxCheckRegionSplitInterval || c.CheckRegionSplitInterval.Duration < minCheckRegionSplitInterval {
+		return errors.New(fmt.Sprintf("[keyspace] check-region-split-interval should between %v and %v",
+			minCheckRegionSplitInterval, maxCheckRegionSplitInterval))
+	}
+	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
+		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	return nil
+}
+
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("wait-region-split") {
+		c.WaitRegionSplit = true
+	}
+	if !meta.IsDefined("wait-region-split-timeout") {
+		c.WaitRegionSplitTimeout = typeutil.NewDuration(defaultWaitRegionSplitTimeout)
+	}
+	if !meta.IsDefined("check-region-split-interval") {
+		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+}
+
+// Clone makes a deep copy of the keyspace config.
+func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg := *c
+	cfg.PreAlloc = preAlloc
+	return &cfg
 }
 
 // GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
 func (c *KeyspaceConfig) GetPreAlloc() []string {
 	return c.PreAlloc
+}
+
+// ToWaitRegionSplit returns whether to wait for the region split to complete.
+func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
+	return c.WaitRegionSplit
+}
+
+// GetWaitRegionSplitTimeout returns the max duration to wait region split.
+func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
+	return c.WaitRegionSplitTimeout.Duration
+}
+
+// GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
+func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
+	return c.CheckRegionSplitInterval.Duration
 }

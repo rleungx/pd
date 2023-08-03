@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 )
 
@@ -51,6 +52,9 @@ type option struct {
 	timeout          time.Duration
 	maxRetryTimes    int
 	enableForwarding bool
+	metricsLabels    prometheus.Labels
+	initMetrics      bool
+	allowTSOFallback bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value

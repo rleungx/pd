@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 )
@@ -43,6 +44,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 				testConfig2: "200",
 			},
 			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}
@@ -61,10 +63,10 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
 	// Loading default keyspace should be successful.
-	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, utils.DefaultKeyspaceName)
 	re.NoError(err)
-	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.GetId())
-	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.GetName())
+	re.Equal(utils.DefaultKeyspaceID, keyspaceDefault.GetId())
+	re.Equal(utils.DefaultKeyspaceName, keyspaceDefault.GetName())
 }
 
 func (suite *clientTestSuite) TestWatchKeyspaces() {
@@ -81,13 +83,20 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
 	re.NoError(err)
 	// Checks that all additional keyspaces are captured by watch channel.
-	for i := 0; i < 10; {
+	ksID := 0
+	for i := 0; i < 20; i++ {
 		loadedKeyspaces := <-watchChan
+		// Create keyspace need disable at first, and update to enabled after split succ.
+		// So it will watch 2 states.
+		if i%2 == 0 {
+			continue
+		}
+
 		re.NotEmpty(loadedKeyspaces)
 		for j := range loadedKeyspaces {
-			re.Equal(additionalKeyspaces[i+j], loadedKeyspaces[j])
+			re.Equal(additionalKeyspaces[ksID+j], loadedKeyspaces[j])
 		}
-		i += len(loadedKeyspaces)
+		ksID++
 	}
 	// Updates to state should also be captured.
 	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
@@ -105,7 +114,7 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 	loaded = <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 	// Updates to default keyspace's config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(keyspace.DefaultKeyspaceName, []*keyspace.Mutation{
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(utils.DefaultKeyspaceName, []*keyspace.Mutation{
 		{
 			Op:    keyspace.OpPut,
 			Key:   "config",
@@ -122,7 +131,8 @@ func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, in
 	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       fmt.Sprintf("test_keyspace_%d", index),
 		Config:     nil,
-		CreateTime: 0, // Use 0 to indicate unchanged keyspace.
+		CreateTime: 0,    // Use 0 to indicate unchanged keyspace.
+		IsPreAlloc: true, // skip wait region split
 	})
 	re.NoError(err)
 	switch state {

@@ -15,8 +15,6 @@
 package resourcemanager_test
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -29,7 +27,6 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -47,7 +44,7 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
+	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
 	addr := s.GetAddr()
 	defer cleanup()
 
@@ -101,13 +98,8 @@ func TestResourceManagerServer(t *testing.T) {
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
-		respString, err := io.ReadAll(resp.Body)
+		respBytes, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		reader := bytes.NewReader(respString)
-		gzipReader, err := gzip.NewReader(reader)
-		re.NoError(err)
-		output, err := io.ReadAll(gzipReader)
-		re.NoError(err)
-		re.Contains(string(output), "resource_manager_server_info")
+		re.Contains(string(respBytes), "resource_manager_server_info")
 	}
 }

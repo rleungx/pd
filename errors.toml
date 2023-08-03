@@ -63,12 +63,17 @@ create TSO stream failed, %s
 
 ["PD:client:ErrClientGetLeader"]
 error = '''
-get leader from %v error
+get leader failed, %v
 '''
 
 ["PD:client:ErrClientGetMember"]
 error = '''
 get member failed
+'''
+
+["PD:client:ErrClientGetMinTSO"]
+error = '''
+get min TSO failed, %v
 '''
 
 ["PD:client:ErrClientGetTSO"]
@@ -481,6 +486,11 @@ error = '''
 init file log error, %s
 '''
 
+["PD:member:ErrCheckCampaign"]
+error = '''
+check campaign failed
+'''
+
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -489,11 +499,6 @@ etcd leader not found
 ["PD:member:ErrMarshalLeader"]
 error = '''
 marshal leader failed
-'''
-
-["PD:member:ErrPreCheckCampaign"]
-error = '''
-pre-check campaign failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]
@@ -746,9 +751,19 @@ error = '''
 get local allocator failed, %s
 '''
 
+["PD:tso:ErrGetMinTS"]
+error = '''
+get min ts failed, %s
+'''
+
 ["PD:tso:ErrKeyspaceGroupIDInvalid"]
 error = '''
 the keyspace group id is invalid, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
 '''
 
 ["PD:tso:ErrKeyspaceGroupNotInitialized"]
