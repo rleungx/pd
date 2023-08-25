@@ -853,6 +853,12 @@ func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
 }
 
+// SetKeyspaceManager sets the keyspace manager of server.
+// Note: it is only used for test.
+func (s *Server) SetKeyspaceManager(keyspaceManager *keyspace.Manager) {
+	s.keyspaceManager = keyspaceManager
+}
+
 // GetKeyspaceGroupManager returns the keyspace group manager of server.
 func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
@@ -1705,6 +1711,9 @@ func (s *Server) reloadConfigFromKV() error {
 }
 
 func (s *Server) loadKeyspaceConfig() {
+	if s.keyspaceManager == nil {
+		return
+	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
 	s.keyspaceManager.UpdateConfig(cfg)
 }
