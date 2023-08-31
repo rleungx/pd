@@ -99,9 +99,9 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		return http.StatusOK, "no changed"
+		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
-	return http.StatusBadRequest, "config item not found"
+	return http.StatusBadRequest, "Config item is not found."
 }
 
 func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {

@@ -16,8 +16,8 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"time"
@@ -557,7 +557,10 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), SchedulerConfigHandlerPath, name)
+	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
+	if err != nil {
+		return err
+	}
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
