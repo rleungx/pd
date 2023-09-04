@@ -101,8 +101,11 @@ var (
 	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	cmdDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
 	cmdDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
+	cmdDurationGetAllKeyspaces          = cmdDuration.WithLabelValues("get_all_keyspaces")
 	cmdDurationGet                      = cmdDuration.WithLabelValues("get")
 	cmdDurationPut                      = cmdDuration.WithLabelValues("put")
+	cmdDurationUpdateGCSafePointV2      = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
+	cmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
@@ -119,6 +122,8 @@ var (
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
 	cmdFailedDurationGet                      = cmdFailedDuration.WithLabelValues("get")
 	cmdFailedDurationPut                      = cmdFailedDuration.WithLabelValues("put")
+	cmdFailedDurationUpdateGCSafePointV2      = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
+	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
 )
 
 func init() {

@@ -240,16 +240,18 @@ const (
 
 	defaultMaxMovableHotPeerSize = int64(512)
 
-	defaultServerMemoryLimit          = 0
-	minServerMemoryLimit              = 0
-	maxServerMemoryLimit              = 0.99
-	defaultServerMemoryLimitGCTrigger = 0.7
-	minServerMemoryLimitGCTrigger     = 0.5
-	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = false
-	defaultGCTunerThreshold           = 0.6
-	minGCTunerThreshold               = 0
-	maxGCTunerThreshold               = 0.9
+	defaultServerMemoryLimit            = 0
+	minServerMemoryLimit                = 0
+	maxServerMemoryLimit                = 0.99
+	defaultServerMemoryLimitGCTrigger   = 0.7
+	minServerMemoryLimitGCTrigger       = 0.5
+	maxServerMemoryLimitGCTrigger       = 0.99
+	defaultEnableGOGCTuner              = false
+	defaultGCTunerThreshold             = 0.6
+	minGCTunerThreshold                 = 0
+	maxGCTunerThreshold                 = 0.9
+	defaultEnableGlobalSafePointV2      = false
+	defaultEnableBlockUpdateSafePointV1 = false
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -1106,6 +1108,8 @@ type PDServerConfig struct {
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	// EnableBlockUpdateSafePointV1 is to block update safe point v1.
+	EnableBlockUpdateSafePointV1 bool `toml:"enable-block-update-safe-point-v1" json:"enable-block-update-safe-point-v1"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -1157,6 +1161,10 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.GCTunerThreshold = minGCTunerThreshold
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
+	}
+
+	if !meta.IsDefined("enable-block-update-safe-point-v1") {
+		c.EnableBlockUpdateSafePointV1 = defaultEnableBlockUpdateSafePointV1
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
@@ -1436,6 +1444,8 @@ type KeyspaceConfig struct {
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
+	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2,string"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -1459,6 +1469,9 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+	if !meta.IsDefined("enable-global-safe-point-v2") {
+		c.EnableGlobalSafePointV2 = defaultEnableGlobalSafePointV2
 	}
 }
 
@@ -1488,4 +1501,14 @@ func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
 // GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
 func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
+}
+
+// GetEnableGlobalSafePointV2 returns whether to enable global safe point v2.
+func (c *KeyspaceConfig) GetEnableGlobalSafePointV2() bool {
+	return c.EnableGlobalSafePointV2
+}
+
+// SetEnableGlobalSafePointV2 set whether to enable global safe point v2.
+func (c *KeyspaceConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	c.EnableGlobalSafePointV2 = isEnable
 }

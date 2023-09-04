@@ -599,6 +599,11 @@ func (o *PersistOptions) GetGCTunerThreshold() float64 {
 	return o.GetPDServerConfig().GCTunerThreshold
 }
 
+// IsBlockUpdateSafePointV1Enabled gets the EnableBlockUpdateSafePointV1 config.
+func (o *PersistOptions) IsBlockUpdateSafePointV1Enabled() bool {
+	return o.GetPDServerConfig().EnableBlockUpdateSafePointV1
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveDownReplica

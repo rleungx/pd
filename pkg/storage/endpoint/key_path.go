@@ -25,29 +25,32 @@ import (
 )
 
 const (
-	pdRootPath                 = "/pd"
-	clusterPath                = "raft"
-	configPath                 = "config"
-	serviceMiddlewarePath      = "service_middleware"
-	schedulePath               = "schedule"
-	gcPath                     = "gc"
-	rulesPath                  = "rules"
-	ruleGroupPath              = "rule_group"
-	regionLabelPath            = "region_label"
-	replicationPath            = "replication_mode"
-	customScheduleConfigPath   = "scheduler_config"
-	gcWorkerServiceSafePointID = "gc_worker"
-	minResolvedTS              = "min_resolved_ts"
-	externalTimeStamp          = "external_timestamp"
-	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
-	keyspaceGCSafePointSuffix  = "gc"
-	keyspacePrefix             = "keyspaces"
-	keyspaceMetaInfix          = "meta"
-	keyspaceIDInfix            = "id"
-	keyspaceAllocID            = "alloc_id"
-	gcSafePointInfix           = "gc_safe_point"
-	serviceSafePointInfix      = "service_safe_point"
-	regionPathPrefix           = "raft/r"
+	pdRootPath               = "/pd"
+	clusterPath              = "raft"
+	configPath               = "config"
+	serviceMiddlewarePath    = "service_middleware"
+	schedulePath             = "schedule"
+	gcPath                   = "gc"
+	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
+	regionLabelPath          = "region_label"
+	replicationPath          = "replication_mode"
+	customScheduleConfigPath = "scheduler_config"
+	// GCWorkerServiceSafePointID is gc worker service id for service safe point.
+	GCWorkerServiceSafePointID = "gc_worker"
+	// NativeBRServiceID is CSE native br service id.
+	NativeBRServiceID         = "native_br"
+	minResolvedTS             = "min_resolved_ts"
+	externalTimeStamp         = "external_timestamp"
+	keyspaceSafePointPrefix   = "keyspaces/gc_safepoint"
+	keyspaceGCSafePointSuffix = "gc"
+	keyspacePrefix            = "keyspaces"
+	keyspaceMetaInfix         = "meta"
+	keyspaceIDInfix           = "id"
+	keyspaceAllocID           = "alloc_id"
+	gcSafePointInfix          = "gc_safe_point"
+	serviceSafePointInfix     = "service_safe_point"
+	regionPathPrefix          = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
 	resourceGroupStatesPath   = "states"
@@ -64,6 +67,10 @@ const (
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
+
+	// Keyspace safe point version.
+	keyspaceGlobalInfix                 = "global"
+	keyspaceGlobalSafePointVersionInfix = "safe_point_version"
 )
 
 // PDRootPath returns the PD root path.
@@ -180,34 +187,29 @@ func ExternalTimestampPath() string {
 	return path.Join(clusterPath, externalTimeStamp)
 }
 
-// KeyspaceServiceSafePointPrefix returns the prefix of given service's service safe point.
-// Prefix: /keyspaces/gc_safepoint/{space_id}/service/
-func KeyspaceServiceSafePointPrefix(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
+// GCSafePointV2Path is the storage path of gc safe point v2.
+// Path: keyspaces/gc_safe_point/{keyspaceID}
+func GCSafePointV2Path(keyspaceID uint32) string {
+	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
 }
 
-// KeyspaceGCSafePointPath returns the gc safe point's path of the given key-space.
-// Path: /keyspaces/gc_safepoint/{space_id}/gc
-func KeyspaceGCSafePointPath(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
+// GCSafePointV2Prefix is the path prefix to all gc safe point v2.
+// Prefix: keyspaces/gc_safe_point/
+func GCSafePointV2Prefix() string {
+	return buildPath(true, keyspacePrefix, gcSafePointInfix)
 }
 
-// KeyspaceServiceSafePointPath returns the path of given service's service safe point.
-// Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
-func KeyspaceServiceSafePointPath(spaceID, serviceID string) string {
-	return path.Join(KeyspaceServiceSafePointPrefix(spaceID), serviceID)
+// ServiceSafePointV2Path is the storage path of service safe point v2.
+// Path: keyspaces/service_safe_point/{spaceID}/{serviceID}
+func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
+	return buildPath(false, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID), serviceID)
 }
 
-// KeyspaceSafePointPrefix returns prefix for all key-spaces' safe points.
-// Path: /keyspaces/gc_safepoint/
-func KeyspaceSafePointPrefix() string {
-	return keyspaceSafePointPrefix + "/"
-}
-
-// KeyspaceGCSafePointSuffix returns the suffix for any gc safepoint.
-// Postfix: /gc
-func KeyspaceGCSafePointSuffix() string {
-	return "/" + keyspaceGCSafePointSuffix
+// ServiceSafePointV2Prefix is the path prefix of all service safe point that belongs to a specific keyspace.
+// Can be used to retrieve keyspace's service safe point at once.
+// Path: keyspaces/service_safe_point/{spaceID}/
+func ServiceSafePointV2Prefix(keyspaceID uint32) string {
+	return buildPath(true, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID))
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
@@ -221,6 +223,18 @@ func KeyspaceMetaPrefix() string {
 func KeyspaceMetaPath(spaceID uint32) string {
 	idStr := EncodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
+}
+
+// KeyspaceGlobalSetPath return the path prefix of global keyspace settings .
+// Path: keyspace/global/
+func KeyspaceGlobalSetPath() string {
+	return path.Join(keyspacePrefix, keyspaceGlobalInfix) + "/"
+}
+
+// KeyspaceGlobalSafePointVersionPath returns global safe point version path.
+// Path: keyspaces/global/safe_point_version
+func KeyspaceGlobalSafePointVersionPath() string {
+	return path.Join(KeyspaceGlobalSetPath(), "/", keyspaceGlobalSafePointVersionInfix)
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.
@@ -343,4 +357,18 @@ func FullTimestampPath(clusterID uint64, groupID uint32) string {
 		rootPath = LegacyRootPath(clusterID)
 	}
 	return path.Join(rootPath, tsPath)
+}
+
+func buildPath(withSuffix bool, str ...string) string {
+	var sb strings.Builder
+	for i := 0; i < len(str); i++ {
+		if i != 0 {
+			sb.WriteString("/")
+		}
+		sb.WriteString(str[i])
+	}
+	if withSuffix {
+		sb.WriteString("/")
+	}
+	return sb.String()
 }

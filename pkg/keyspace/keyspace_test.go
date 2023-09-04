@@ -56,6 +56,15 @@ type mockConfig struct {
 	WaitRegionSplit          bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
+	EnableGlobalSafePointV2  bool
+}
+
+func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	m.EnableGlobalSafePointV2 = isEnable
+}
+
+func (m *mockConfig) GetEnableGlobalSafePointV2() bool {
+	return m.EnableGlobalSafePointV2
 }
 
 func (m *mockConfig) GetPreAlloc() []string {

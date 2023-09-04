@@ -131,6 +131,15 @@ func validateName(name string) error {
 	return nil
 }
 
+// MaskKeyspaceID is used to hash the spaceID inside the lockGroup.
+// A simple mask is applied to spaceID to use its last byte as map key,
+// limiting the maximum map length to 256.
+// Since keyspaceID is sequentially allocated, this can also reduce the chance
+// of collision when comparing with random hashes.
+func MaskKeyspaceID(id uint32) uint32 {
+	return id & 0xFF
+}
+
 // RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //

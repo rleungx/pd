@@ -55,6 +55,11 @@ const (
 	// We use 120 here to leave some space for other operations.
 	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
 	MaxEtcdTxnOps = 120
+
+	// SafePointVersion is the key for safe point version in keyspace meta config.
+	SafePointVersion = "safe_point_version"
+	// KeyspaceGlobalSafePointVersionV2 is the safe point v2 value for keyspace safe point version.
+	KeyspaceGlobalSafePointVersionV2 = "v2"
 )
 
 // Config is the interface for keyspace config.
@@ -63,6 +68,8 @@ type Config interface {
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
+	GetEnableGlobalSafePointV2() bool
+	SetEnableGlobalSafePointV2(isEnable bool)
 }
 
 // Manager manages keyspace related data.
@@ -107,7 +114,7 @@ func NewKeyspaceManager(
 	config Config,
 	kgm *GroupManager,
 ) *Manager {
-	return &Manager{
+	manager := &Manager{
 		ctx: ctx,
 		// Remove the lock of the given key from the lock group when unlock to
 		// keep minimal working set, which is suited for low qps, non-time-critical
@@ -122,6 +129,33 @@ func NewKeyspaceManager(
 		kgm:               kgm,
 		nextPatrolStartID: utils.DefaultKeyspaceID,
 	}
+	manager.SetGlobalSafePointV2()
+	return manager
+}
+
+// SetGlobalSafePointV2 is used to set safe point version by config.
+func (manager *Manager) SetGlobalSafePointV2() error {
+	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		globalSafePointVersion, err := manager.store.GetGlobalSavePointVersion(txn)
+		if err != nil {
+			return err
+		}
+
+		if len(globalSafePointVersion) == 0 || globalSafePointVersion != KeyspaceGlobalSafePointVersionV2 {
+			if manager.config.GetEnableGlobalSafePointV2() {
+				// If config EnableGlobalSafePointV2 is true, save global safe point version as v2.
+				err = manager.store.SaveGlobalSavePointVersion(txn, KeyspaceGlobalSafePointVersionV2)
+				if err != nil {
+					return err
+				}
+			} else {
+				manager.config.SetEnableGlobalSafePointV2(false)
+				return nil
+			}
+		}
+		manager.config.SetEnableGlobalSafePointV2(true)
+		return nil
+	})
 }
 
 // Bootstrap saves default keyspace info.
@@ -142,6 +176,9 @@ func (manager *Manager) Bootstrap() error {
 	config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
 	if err != nil {
 		return err
+	}
+	if manager.config.GetEnableGlobalSafePointV2() {
+		config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
 	defaultKeyspaceMeta.Config = config
 	err = manager.saveNewKeyspace(defaultKeyspaceMeta)
@@ -181,6 +218,7 @@ func (manager *Manager) Bootstrap() error {
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
 	manager.config = cfg
+	manager.SetGlobalSafePointV2()
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
@@ -206,6 +244,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
+	}
+	if manager.config.GetEnableGlobalSafePointV2() {
+		request.Config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
