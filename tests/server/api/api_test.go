@@ -454,6 +454,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	defer os.RemoveAll(tempStdoutFile.Name())
 	cfg := &log.Config{}
 	cfg.File.Filename = tempStdoutFile.Name()
 	cfg.Level = "info"
