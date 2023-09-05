@@ -338,6 +338,12 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		if loadedMeta != nil {
 			return ErrKeyspaceExists
 		}
+		if manager.config.GetEnableGlobalSafePointV2() {
+			err = manager.store.InitKeyspaceGCSafePointV2(txn, keyspace.Id)
+			if err != nil {
+				return err
+			}
+		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
 }
