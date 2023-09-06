@@ -475,8 +475,6 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	suite.Contains(string(b), "audit log")
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
-
-	os.Remove(tempStdoutFile.Name())
 }
 
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
