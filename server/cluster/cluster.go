@@ -332,13 +332,13 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 		c.initSchedulers()
 	} else {
-		c.wg.Add(3)
+		c.wg.Add(2)
 		go c.runCoordinator()
 		go c.runStatsBackgroundJobs()
-		go c.runMetricsCollectionJob()
 	}
 
-	c.wg.Add(7)
+	c.wg.Add(8)
+	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
 	go c.syncRegions()
 	go c.runReplicationMode()
@@ -608,6 +608,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker.Stop()
 		ticker = time.NewTicker(time.Microsecond)
 	})
 
@@ -632,6 +633,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker.Stop()
 		ticker = time.NewTicker(2 * time.Second)
 	})
 	defer ticker.Stop()
@@ -1484,27 +1486,22 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-
 	// Remove an offline store should be OK, nothing to do.
 	if store.IsRemoving() && store.IsPhysicallyDestroyed() == physicallyDestroyed {
 		return nil
 	}
-
 	if store.IsRemoved() {
 		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
-
 	if store.IsPhysicallyDestroyed() {
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
-
 	if (store.IsPreparing() || store.IsServing()) && !physicallyDestroyed {
 		if err := c.checkReplicaBeforeOfflineStore(storeID); err != nil {
 			return err
 		}
 	}
-
-	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed))
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
@@ -1613,7 +1610,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		}
 	}
 
-	newStore := store.Clone(core.TombstoneStore())
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
@@ -1719,7 +1716,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return nil
 	}
 
-	options := []core.StoreCreateOption{core.UpStore()}
+	options := []core.StoreCreateOption{core.SetStoreState(metapb.StoreState_Up)}
 	// get the previous store limit recorded in memory
 	limiter, exist := c.prevStoreLimit[storeID]
 	if exist {
@@ -1766,7 +1763,7 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 		return errs.ErrStoreServing.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(core.UpStore())
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Up))
 	log.Info("store has changed to serving",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
