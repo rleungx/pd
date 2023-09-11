@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - release-7.1-keyspace
+concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 jobs:
