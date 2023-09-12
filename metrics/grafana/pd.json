@@ -6892,14 +6892,14 @@
               "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "store-{{store}}",
+              "legendFormat": "store-{{source}}",
               "refId": "A"
             },
             {
               "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "store-{{store}}",
+              "legendFormat": "store-{{target}}",
               "refId": "B"
             }
           ],
@@ -6996,14 +6996,14 @@
               "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "store-{{store}}",
+              "legendFormat": "store-{{source}}",
               "refId": "A"
             },
             {
               "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "store-{{store}}",
+              "legendFormat": "store-{{target}}",
               "refId": "B"
             }
           ],
