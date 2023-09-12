@@ -1109,7 +1109,7 @@ type PDServerConfig struct {
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 	// EnableBlockUpdateSafePointV1 is to block update safe point v1.
-	EnableBlockUpdateSafePointV1 bool `toml:"enable-block-update-safe-point-v1" json:"enable-block-update-safe-point-v1"`
+	EnableBlockUpdateSafePointV1 bool `toml:"enable-block-update-safe-point-v1" json:"enable-block-update-safe-point-v1,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
