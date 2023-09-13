@@ -144,6 +144,10 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 		if !r.checkRegionValid(region) {
 			continue
 		}
+		if bytes.Equal(region.GetStartKey(), key) {
+			continue
+		}
+
 		log.Info("found region",
 			zap.Uint64("region-id", region.GetID()),
 			logutil.ZapRedactByteString("key", key))
