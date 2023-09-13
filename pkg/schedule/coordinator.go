@@ -407,6 +407,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			if err = c.schedulers.AddScheduler(s); err != nil {
 				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
+		} else if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+			log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
 	}
 
@@ -435,6 +437,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				scheduleCfg.Schedulers[k] = schedulerCfg
 				k++
 			}
+		} else if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 		}
 	}
 
@@ -470,6 +474,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	// TODO: handle the plugin in API service mode.
 	if err = c.schedulers.AddScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 		return
