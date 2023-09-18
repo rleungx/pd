@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -484,4 +486,117 @@ func TestScheduler(t *testing.T) {
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
+}
+
+func TestSchedulerDiagnostic(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	checkSchedulerDescribeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
+		result := make(map[string]interface{})
+		testutil.Eventually(re, func() bool {
+			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+			return len(result) != 0
+		}, testutil.WithTickInterval(50*time.Millisecond))
+		re.Equal(expectedStatus, result["status"])
+		re.Equal(expectedSummary, result["summary"])
+	}
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	for _, store := range stores {
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+	}
+
+	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+	time.Sleep(3 * time.Second)
+
+	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
+	re.Contains(echo, "Success!")
+	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
+
+	// scheduler delete command
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
+
+	checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
+
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
+}
+
+func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v interface{}) string {
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	if v == nil {
+		return string(output)
+	}
+	re.NoError(json.Unmarshal(output, v))
+	return ""
+}
+
+func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v interface{}) {
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	if v == nil {
+		return
+	}
+	json.Unmarshal(output, v)
+}
+
+func TestForwardSchedulerRequest(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	server := cluster.GetServer(cluster.GetLeader())
+	re.NoError(server.BootstrapCluster())
+	backendEndpoints := server.GetAddr()
+	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	cmd := pdctlCmd.GetRootCmd()
+	args := []string{"-u", backendEndpoints, "scheduler", "show"}
+	var slice []string
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &slice))
+	re.Contains(slice, "balance-leader-scheduler")
 }
