@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
@@ -89,7 +90,7 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
 			return
 		}
 		ids = append(ids, id)
@@ -125,7 +126,7 @@ func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Requ
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(id).Error())
+			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
 			return
 		}
 		ids = append(ids, id)
