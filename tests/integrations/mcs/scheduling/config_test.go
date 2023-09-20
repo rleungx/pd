@@ -133,7 +133,6 @@ func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 
 func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	re := suite.Require()
-
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
@@ -149,7 +148,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	// Get all default scheduler names.
 	var namesFromAPIServer []string
 	testutil.Eventually(re, func() bool {
-		namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllScheduleConfig()
+		namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
 		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.

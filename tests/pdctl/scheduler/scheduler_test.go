@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -587,16 +588,35 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	server := cluster.GetServer(cluster.GetLeader())
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 
 	cmd := pdctlCmd.GetRootCmd()
 	args := []string{"-u", backendEndpoints, "scheduler", "show"}
-	var slice []string
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &slice))
-	re.Contains(slice, "balance-leader-scheduler")
+	var sches []string
+	testutil.Eventually(re, func() bool {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &sches))
+		return slice.Contains(sches, "balance-leader-scheduler")
+	})
+
+	mustUsage := func(args []string) {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.Contains(string(output), "Usage")
+	}
+	mustUsage([]string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler"})
+	echo := mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
+	re.Contains(echo, "Success!")
+	checkSchedulerWithStatusCommand := func(status string, expected []string) {
+		var schedulers []string
+		mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "show", "--status", status}, &schedulers)
+		re.Equal(expected, schedulers)
+	}
+	checkSchedulerWithStatusCommand("paused", []string{
+		"balance-leader-scheduler",
+	})
 }

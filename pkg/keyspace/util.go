@@ -203,8 +203,8 @@ func getRegionLabelID(id uint32) string {
 	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
+// makeLabelRule makes the label rule for the given keyspace id.
+func makeLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,

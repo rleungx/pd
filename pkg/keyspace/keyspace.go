@@ -358,7 +358,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 
 	start := time.Now()
 	skipRaw := manager.config.GetDisableRawKVRegionSplit()
-	keyspaceRule := MakeLabelRule(id, skipRaw)
+	keyspaceRule := makeLabelRule(id, skipRaw)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
 		return errors.New("cluster does not support region label")
