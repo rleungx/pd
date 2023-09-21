@@ -346,7 +346,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go getTsoFunc()
 	go func() {
 		defer wg.Done()
-		leader := cluster.GetServer(cluster.GetLeader())
+		leader := cluster.GetLeaderServer()
 		leader.Stop()
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
@@ -361,7 +361,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go getTsoFunc()
 	go func() {
 		defer wg.Done()
-		leader := cluster.GetServer(cluster.GetLeader())
+		leader := cluster.GetLeaderServer()
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 		leader.Stop()
 		re.NotEmpty(cluster.WaitLeader())
@@ -595,7 +595,7 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(cluster.GetServer(cluster.GetLeader()).ResignLeader())
+	re.NoError(cluster.GetLeaderServer().ResignLeader())
 	re.NotEmpty(cluster.WaitLeader())
 	lastTS = checkTS(re, cli, lastTS)
 
@@ -621,7 +621,7 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 	err := cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	testServers := cluster.GetServers()
@@ -1431,7 +1431,7 @@ func TestPutGet(t *testing.T) {
 	getResp, err = client.Get(context.Background(), key)
 	re.NoError(err)
 	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
-	s := cluster.GetServer(cluster.GetLeader())
+	s := cluster.GetLeaderServer()
 	// use etcd client delete the key
 	_, err = s.GetEtcdClient().Delete(context.Background(), string(key))
 	re.NoError(err)
@@ -1451,7 +1451,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	client := setupCli(re, ctx, endpoints)
 	defer client.Close()
-	s := cluster.GetServer(cluster.GetLeader())
+	s := cluster.GetLeaderServer()
 	watchPrefix := "watch_test"
 	defer func() {
 		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")

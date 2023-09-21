@@ -785,7 +785,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	// Test Resource Group CURD via HTTP
 	finalNum = 1
 	getAddr := func(i int) string {
-		server := suite.cluster.GetServer(suite.cluster.GetLeader())
+		server := suite.cluster.GetLeaderServer()
 		if i%2 == 1 {
 			server = suite.cluster.GetServer(suite.cluster.GetFollower())
 		}

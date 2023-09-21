@@ -29,8 +29,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
-
 type schedulerHandler struct {
 	*server.Handler
 	svr *server.Server
