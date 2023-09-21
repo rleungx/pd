@@ -15,8 +15,8 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -321,13 +321,18 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
-	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	statusCode, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
+	deleteURL, err := url.JoinPath(h.GetAddr(), "pd", server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
 	if err != nil {
-		h.r.JSON(w, statusCode, err.Error())
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, statusCode, nil)
+	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), deleteURL)
+	if err != nil {
+		h.r.JSON(w, resp.StatusCode, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	h.r.JSON(w, resp.StatusCode, nil)
 }
 
 // FIXME: details of input json body params
