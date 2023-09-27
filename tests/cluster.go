@@ -828,6 +828,9 @@ func (c *TestCluster) Destroy() {
 			log.Error("failed to destroy the cluster:", errs.ZapError(err))
 		}
 	}
+	if c.schedulingCluster != nil {
+		c.schedulingCluster.Destroy()
+	}
 }
 
 // CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
