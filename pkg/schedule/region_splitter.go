@@ -167,9 +167,6 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 }
 
 func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
-	if r.cluster.IsRegionHot(region) {
-		return false
-	}
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		return false
