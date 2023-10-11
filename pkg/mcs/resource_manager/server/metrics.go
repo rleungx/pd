@@ -27,9 +27,6 @@ const (
 	typeLabel              = "type"
 	readTypeLabel          = "read"
 	writeTypeLabel         = "write"
-	backgroundTypeLabel    = "background"
-	tiflashTypeLabel       = "ap"
-	tidbTypeLabel          = "tp"
 )
 
 var (
@@ -49,7 +46,7 @@ var (
 			Name:      "read_request_unit",
 			Help:      "Bucketed histogram of the read request unit cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(1, 10, 5), // 1 ~ 100000
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	writeRequestUnitCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -57,7 +54,7 @@ var (
 			Name:      "write_request_unit",
 			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	sqlLayerRequestUnitCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -74,7 +71,7 @@ var (
 			Name:      "read_byte",
 			Help:      "Bucketed histogram of the read byte cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	writeByteCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -82,7 +79,7 @@ var (
 			Name:      "write_byte",
 			Help:      "Bucketed histogram of the write byte cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	kvCPUCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -90,7 +87,7 @@ var (
 			Name:      "kv_cpu_time_ms",
 			Help:      "Bucketed histogram of the KV CPU time cost in milliseconds for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	sqlCPUCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -98,7 +95,7 @@ var (
 			Name:      "sql_cpu_time_ms",
 			Help:      "Bucketed histogram of the SQL CPU time cost in milliseconds for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel})
 	requestCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
