@@ -190,10 +190,17 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Send the consumption to update the metrics.
+			isBackground := req.GetIsBackground()
+			isTiFlash := req.GetIsTiflash()
+			if isBackground && isTiFlash {
+				return errors.New("background and tiflash cannot be true at the same time")
+			}
 			s.manager.consumptionDispatcher <- struct {
 				resourceGroupName string
 				*rmpb.Consumption
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
+				isBackground bool
+				isTiFlash    bool
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
