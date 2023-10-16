@@ -252,6 +252,7 @@ const (
 	maxGCTunerThreshold                 = 0.9
 	defaultEnableGlobalSafePointV2      = false
 	defaultEnableBlockUpdateSafePointV1 = false
+	defaultSkipRawKVRegionSplit         = false
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -1442,6 +1443,8 @@ type KeyspaceConfig struct {
 	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
 	// WaitRegionSplitTimeout indicates the max duration to wait region split.
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
+	// SkipRawKVRegionSplit indicates whether to skip raw kv region split.
+	SkipRawKVRegionSplit bool `toml:"skip-raw-kv-region-split" json:"skip-raw-kv-region-split"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
 	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
@@ -1473,6 +1476,9 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-global-safe-point-v2") {
 		c.EnableGlobalSafePointV2 = defaultEnableGlobalSafePointV2
 	}
+	if !meta.IsDefined("skip-raw-kv-region-split") {
+		c.SkipRawKVRegionSplit = defaultSkipRawKVRegionSplit
+	}
 }
 
 // Clone makes a deep copy of the keyspace config.
@@ -1491,6 +1497,11 @@ func (c *KeyspaceConfig) GetPreAlloc() []string {
 // ToWaitRegionSplit returns whether to wait for the region split to complete.
 func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
 	return c.WaitRegionSplit
+}
+
+// GetSkipRawKVRegionSplit returns whether to skip raw kv region split.
+func (c *KeyspaceConfig) GetSkipRawKVRegionSplit() bool {
+	return c.SkipRawKVRegionSplit
 }
 
 // GetWaitRegionSplitTimeout returns the max duration to wait region split.
