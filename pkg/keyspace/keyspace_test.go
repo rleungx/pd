@@ -158,6 +158,26 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re.Error(err)
 }
 
+func (suite *keyspaceTestSuite) TestEnableGlobalSafePointV2CreateKeyspace() {
+	re := suite.Require()
+	manager := suite.manager
+	manager.config.SetEnableGlobalSafePointV2(true)
+	requests := makeCreateKeyspaceRequests(10)
+
+	for i, request := range requests {
+		created, err := manager.CreateKeyspace(request)
+		re.NoError(err)
+		re.Equal(uint32(i+1), created.Id)
+		checkSafePointVersion(re, created)
+	}
+}
+
+func checkSafePointVersion(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	val, ok := meta.Config[SafePointVersion]
+	re.Equal(ok, true)
+	re.Equal(val, KeyspaceGlobalSafePointVersionV2)
+}
+
 func makeMutations() []*Mutation {
 	return []*Mutation{
 		{
