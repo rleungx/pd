@@ -37,9 +37,7 @@ import (
 
 const maxScheduleRetries = 10
 
-var (
-	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
-)
+var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 
 // Controller is used to manage all schedulers.
 type Controller struct {
