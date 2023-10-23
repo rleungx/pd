@@ -67,7 +67,7 @@ const (
 type Config interface {
 	GetPreAlloc() []string
 	ToWaitRegionSplit() bool
-	GetSkipRawKVRegionSplit() bool
+	GetDisableRawKVRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
 	GetEnableGlobalSafePointV2() bool
@@ -358,8 +358,8 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	})
 
 	start := time.Now()
-	skipRawKVRegionSplit := manager.config.GetSkipRawKVRegionSplit()
-	keyspaceRule := makeLabelRule(id, skipRawKVRegionSplit)
+	skipRaw := manager.config.GetDisableRawKVRegionSplit()
+	keyspaceRule := makeLabelRule(id, skipRaw)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
 		return errors.New("cluster does not support region label")
