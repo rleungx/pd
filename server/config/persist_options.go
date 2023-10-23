@@ -606,6 +606,13 @@ func (o *PersistOptions) GetGCTunerThreshold() float64 {
 	return o.GetPDServerConfig().GCTunerThreshold
 }
 
+// SetBlockUpdateSafePointV1Enabled to set the option for block update gc v1 . It's only used to test.
+func (o *PersistOptions) SetBlockUpdateSafePointV1Enabled(enable bool) {
+	cfg := o.GetPDServerConfig().Clone()
+	cfg.EnableBlockUpdateSafePointV1 = enable
+	o.SetPDServerConfig(cfg)
+}
+
 // IsBlockUpdateSafePointV1Enabled gets the EnableBlockUpdateSafePointV1 config.
 func (o *PersistOptions) IsBlockUpdateSafePointV1Enabled() bool {
 	return o.GetPDServerConfig().EnableBlockUpdateSafePointV1

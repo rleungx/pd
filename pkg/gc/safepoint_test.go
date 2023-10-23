@@ -163,3 +163,23 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 	re.NoError(err)
 	re.True(updated)
 }
+
+func TestBlockSafePointV1Update(t *testing.T) {
+	re := require.New(t)
+
+	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{}, config.NewPersistOptions(config.NewConfig()))
+	manager.persistOptions.SetBlockUpdateSafePointV1Enabled(true)
+	testServiceID := "test_service_id"
+	testServiceSafePoint := uint64(8)
+
+	_, updated, err := manager.UpdateServiceGCSafePoint(testServiceID, testServiceSafePoint, math.MaxInt64, time.Now())
+	re.Error(err)
+	re.Equal("Don't allow update service safe point v1.", err.Error())
+
+	re.False(updated)
+
+	testGCSafePoint := uint64(8)
+	_, err = manager.UpdateGCSafePoint(testGCSafePoint)
+	re.Error(err)
+	re.Equal("Don't allow update gc safe point v1.", err.Error())
+}
