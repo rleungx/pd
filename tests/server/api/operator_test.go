@@ -74,6 +74,7 @@ func (suite *operatorTestSuite) TestOperator() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
+	suite.pauseRuleChecker(cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -107,6 +108,8 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 			ConfVer: 1,
 			Version: 1,
 		},
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
 	}
 	regionInfo := core.NewRegionInfo(region, peer1)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
@@ -177,6 +180,7 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
+	suite.pauseRuleChecker(cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
