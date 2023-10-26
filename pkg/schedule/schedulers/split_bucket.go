@@ -249,6 +249,9 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 	}
 	if splitBucket != nil {
 		region := plan.cluster.GetRegion(splitBucket.RegionID)
+		if region == nil {
+			return nil
+		}
 		splitKey := make([][]byte, 0)
 		if bytes.Compare(region.GetStartKey(), splitBucket.StartKey) < 0 {
 			splitKey = append(splitKey, splitBucket.StartKey)
@@ -256,7 +259,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			splitBucketCreateOpeartorFailCounter.Inc()
