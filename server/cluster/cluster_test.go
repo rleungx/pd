@@ -2124,7 +2124,7 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
-	rc.schedulingController.init(basicCluster, opt, nil, rc.ruleManager)
+	rc.schedulingController = newSchedulingController(rc.ctx, rc.core, rc.opt, rc.ruleManager)
 	return rc
 }
 
@@ -2491,8 +2491,8 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		controller.CollectSchedulerMetrics()
 		co.GetCluster().(*RaftCluster).collectStatisticsMetrics()
 	}
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
 	wg.Wait()
 }
@@ -2537,8 +2537,8 @@ func TestCollectMetrics(t *testing.T) {
 		s.Stats = nil
 	}
 	re.Equal(status1, status2)
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
 }
 

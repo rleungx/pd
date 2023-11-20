@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -36,7 +37,9 @@ import (
 
 const maxScheduleRetries = 10
 
-var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+var (
+	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+)
 
 // Controller is used to manage all schedulers.
 type Controller struct {
@@ -108,7 +111,6 @@ func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 // CollectSchedulerMetrics collects metrics of all schedulers.
 func (c *Controller) CollectSchedulerMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	for _, s := range c.schedulers {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
@@ -118,6 +120,15 @@ func (c *Controller) CollectSchedulerMetrics() {
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
 	}
+	c.RUnlock()
+	ruleMgr := c.cluster.GetRuleManager()
+	if ruleMgr == nil {
+		return
+	}
+	ruleCnt := ruleMgr.GetRulesCount()
+	groupCnt := ruleMgr.GetGroupsCount()
+	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
 }
 
 func (c *Controller) isSchedulingHalted() bool {
@@ -125,8 +136,9 @@ func (c *Controller) isSchedulingHalted() bool {
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
-func (c *Controller) ResetSchedulerMetrics() {
+func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
+	ruleStatusGauge.Reset()
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
@@ -145,7 +157,8 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	return nil
+	err := scheduler.PrepareConfig(c.cluster)
+	return err
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -172,6 +185,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
+	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
 
 	return nil
@@ -187,7 +201,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
-	if err := s.Scheduler.Prepare(c.cluster); err != nil {
+	if err := s.Scheduler.PrepareConfig(c.cluster); err != nil {
 		return err
 	}
 
@@ -267,7 +281,7 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
-		return nil
+		return fmt.Errorf("scheduler %s is not existed", name)
 	}
 	return c.GetScheduler(name).ReloadConfig()
 }
@@ -332,7 +346,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer s.Scheduler.Cleanup(c.cluster)
+	defer s.Scheduler.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()
