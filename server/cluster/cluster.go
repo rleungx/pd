@@ -652,7 +652,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(time.Microsecond)
+		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -732,10 +732,10 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
+	c.cancel()
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	c.cancel()
 	c.Unlock()
 
 	c.wg.Wait()
