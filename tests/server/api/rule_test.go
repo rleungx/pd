@@ -1092,7 +1092,6 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	var label labeler.LabelRule
 	escapedID := url.PathEscape("keyspaces/0")
 	u = fmt.Sprintf("%s/config/region-label/rule/%s", urlPrefix, escapedID)
-	fmt.Println("u====", u)
 	err = tu.ReadGetJSON(re, testDialClient, u, &label)
 	suite.NoError(err)
 	suite.Equal(label.ID, "keyspaces/0")
