@@ -162,3 +162,44 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+  build-arm64:
+    name: Build ARM64 Image
+    runs-on: arm64
+    env:
+      GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
+    steps:
+      - name: Build and Push Images
+        uses: docker/build-push-action@v2
+        with:
+          platforms: "linux/arm64"
+          push: true
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
+          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
+  build-amd64:
+    name: Build AMD64 Image
+    runs-on: amd64
+    env:
+      GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
+    steps:
+      - name: Build and Push Images
+        uses: docker/build-push-action@v2
+        with:
+          platforms: "linux/amd64"
+          push: true
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
+          tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64
+  multi-arch:
+    name: Create Multi-Architecture Image
+    runs-on: amd64
+    needs: ["build-arm64", "build-amd64"]
+    steps:
+      - name: create-manifest
+        run: |
+          docker manifest create hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }} \
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64 \
+          --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
+      - name: push-manifest
+        run: |
+          docker manifest push hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}

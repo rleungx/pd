@@ -1,20 +1,11 @@
-FROM golang:1.20-bullseye as builder
+FROM golang:1.21-bullseye as builder
 
 RUN apt update && apt install -y make git curl gcc g++ unzip
 
 # Setup ssh key for private deps
-ARG ssh_key
-RUN if [ -n "$ssh_key" ]; then \
-        mkdir -p ~/.ssh && \
-        echo "$ssh_key" > ~/.ssh/key && \
-        chmod 600 ~/.ssh/key && \
-        echo "Host github.com" >> ~/.ssh/config && \
-        echo "\tUser git" >> ~/.ssh/config && \
-        echo "\tPort 443" >> ~/.ssh/config && \
-        echo "\tHostName ssh.github.com" >> ~/.ssh/config && \
-        echo "\tIdentityFile ~/.ssh/key" >> ~/.ssh/config && \
-        ssh-keyscan -p 443 ssh.github.com>> ~/.ssh/known_hosts && \
-        git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"; \
+ARG GITHUB_TOKEN
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
     fi
 
 RUN mkdir -p /go/src/github.com/tikv/pd
@@ -27,6 +18,13 @@ COPY go.sum .
 RUN GO111MODULE=on go mod download
 
 COPY . .
+
+# Set CGO_ENABLED=0 for cross compiling.
+ENV CGO_ENABLED=0
+# Skip swagger generation.
+ENV SWAGGER=0
+# Skip building dashboard.
+ENV DASHBOARD=0
 
 RUN make
 
