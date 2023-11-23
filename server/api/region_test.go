@@ -16,6 +16,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"net/url"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
@@ -450,6 +452,40 @@ func (suite *regionTestSuite) TestTopN() {
 			suite.Equal(writtenBytes[i], topN[i].GetBytesWritten())
 		}
 	}
+}
+
+func TestRegionsWithKillRequest(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
+	mustBootstrapCluster(re, svr)
+	regionCount := 100000
+	for i := 0; i < regionCount; i++ {
+		r := core.NewTestRegionInfo(uint64(i+2), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+			core.SetApproximateKeys(10), core.SetApproximateSize(10))
+		mustRegionHeartbeat(re, svr, r)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	re.NoError(err)
+	respCh := make(chan *http.Response)
+	go func() {
+		resp, err := testDialClient.Do(req) // nolint:bodyclose
+		re.Error(err)
+		re.Contains(err.Error(), "context canceled")
+		respCh <- resp
+	}()
+	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	cancel()                           // close the request
+	resp := <-respCh
+	re.Nil(resp)
 }
 
 type getRegionTestSuite struct {

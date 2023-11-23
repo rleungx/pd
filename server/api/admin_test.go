@@ -84,7 +84,7 @@ func (suite *adminTestSuite) TestDropRegion() {
 
 	// After drop region from cache, lower version is accepted.
 	url := fmt.Sprintf("%s/admin/cache/region/%d", suite.urlPrefix, region.GetID())
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	suite.NoError(err)
 	res, err := testDialClient.Do(req)
 	suite.NoError(err)
@@ -146,7 +146,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 
 	// After drop all regions from cache, lower version is accepted.
 	url := fmt.Sprintf("%s/admin/cache/regions", suite.urlPrefix)
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	suite.NoError(err)
 	res, err := testDialClient.Do(req)
 	suite.NoError(err)

@@ -217,7 +217,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
 	suite.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
@@ -247,7 +247,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
 	suite.NoError(err)
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
@@ -277,7 +277,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
 	suite.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.3")

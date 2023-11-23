@@ -375,7 +375,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
 	leader := suite.cluster.GetLeaderServer()
 	suite.NotNil(leader)
-	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
+	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", http.NoBody)
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	suite.True(resp.StatusCode == http.StatusNotFound)
@@ -396,14 +396,14 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	resp.Body.Close()
 	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 	timeUnix := time.Now().Unix() - 20
-	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
@@ -422,14 +422,14 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
-	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
@@ -543,7 +543,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 }
 
 func doTestRequestWithLogAudit(srv *tests.TestServer) {
-	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), nil)
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), http.NoBody)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
@@ -551,7 +551,7 @@ func doTestRequestWithLogAudit(srv *tests.TestServer) {
 
 func doTestRequestWithPrometheus(srv *tests.TestServer) {
 	timeUnix := time.Now().Unix() - 20
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
@@ -612,7 +612,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	}
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := dialClient.Do(request)
@@ -637,7 +637,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	// Request to follower without redirectorHeader is OK.
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
@@ -670,7 +670,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	addr := follower.GetAddr() + "/pd/api/v1/regions"
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
@@ -976,7 +976,7 @@ func TestPreparingProgress(t *testing.T) {
 }
 
 func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
-	req, _ := http.NewRequest(method, url, nil)
+	req, _ := http.NewRequest(method, url, http.NoBody)
 	resp, err := dialClient.Do(req)
 	re.NoError(err)
 	re.Equal(statusCode, resp.StatusCode)
