@@ -48,7 +48,7 @@ var (
 	fastNotifyInterval = 2 * time.Second
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
-	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	// FastOperatorFinishTime min finish time, if finish duration less than it, op will be pushed to fast operator queue
 	FastOperatorFinishTime = 10 * time.Second
 )
 
@@ -660,7 +660,7 @@ func (oc *Controller) GetOperatorStatus(id uint64) *OpWithStatus {
 	return oc.records.Get(id)
 }
 
-// GetOperator gets a operator from the given region.
+// GetOperator gets an operator from the given region.
 func (oc *Controller) GetOperator(regionID uint64) *Operator {
 	oc.RLock()
 	defer oc.RUnlock()

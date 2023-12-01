@@ -2,8 +2,6 @@ module github.com/tikv/pd/tests/integrations/client
 
 go 1.21
 
-toolchain go1.21.0
-
 replace (
 	github.com/tikv/pd => ../../../
 	github.com/tikv/pd/client => ../../../client

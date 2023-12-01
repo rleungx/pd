@@ -2,8 +2,6 @@ module github.com/tikv/pd
 
 go 1.21
 
-toolchain go1.21.0
-
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1

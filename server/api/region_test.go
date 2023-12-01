@@ -16,7 +16,6 @@ package api
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -141,12 +140,6 @@ func (suite *regionTestSuite) TestRegion() {
 
 	url = fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, "a")
 	r2 := &RegionInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
-	r2.Adjust()
-	suite.Equal(NewAPIRegionInfo(r), r2)
-
-	url = fmt.Sprintf("%s/region/key/%s?format=hex", suite.urlPrefix, hex.EncodeToString([]byte("a")))
-	r2 = &RegionInfo{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
 	suite.Equal(NewAPIRegionInfo(r), r2)

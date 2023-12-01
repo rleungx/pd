@@ -116,7 +116,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_action_status",
 			Help:      "Store trend scheduler calculating actions",
-		}, []string{"reason"})
+		}, []string{"type", "status"})
 
 	storeSlowTrendMiscGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -124,7 +124,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_misc",
 			Help:      "Store trend internal uncatalogued values",
-		}, []string{"type"})
+		}, []string{"type", "dim"})
 
 	// HotPendingSum is the sum of pending influence in hot region scheduler.
 	HotPendingSum = prometheus.NewGaugeVec(

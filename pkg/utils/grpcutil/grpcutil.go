@@ -171,6 +171,23 @@ func GetForwardedHost(ctx context.Context) string {
 	return ""
 }
 
+func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+	tlsCfg, err := tlsConfig.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	cc, err := GetClientConn(
+		ctx,
+		addr,
+		tlsCfg,
+		do...,
+	)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return cc, nil
+}
+
 // CheckStream checks stream status, if stream is not created successfully in time, cancel context.
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
@@ -196,23 +213,6 @@ func NeedRebuildConnection(err error) bool {
 		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
 		strings.Contains(err.Error(), codes.ResourceExhausted.String()) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
 	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
-}
-
-func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	tlsCfg, err := tlsConfig.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	cc, err := GetClientConn(
-		ctx,
-		addr,
-		tlsCfg,
-		do...,
-	)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return cc, nil
 }
 
 // CreateClientConn creates a client connection to the given target.
