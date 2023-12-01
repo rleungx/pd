@@ -317,7 +317,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	return defaultKeySpaceGroupID
 }
 
-// DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
+// discoverMicroservice discovers the microservice with the specified type and returns the server urls.
 func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:

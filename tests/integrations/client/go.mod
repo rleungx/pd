@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/integrations/client
 
-go 1.21
+go 1.20
 
 replace (
 	github.com/tikv/pd => ../../../
