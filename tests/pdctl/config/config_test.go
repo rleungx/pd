@@ -718,7 +718,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleCount := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := pdctl.ExecuteCommand(cmd, args...)
 			re.NoError(err)
@@ -729,7 +729,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleLocationLabels := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := pdctl.ExecuteCommand(cmd, args...)
 			re.NoError(err)
@@ -740,7 +740,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleIsolationLevel := func(expect string) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := pdctl.ExecuteCommand(cmd, args...)
 			re.NoError(err)

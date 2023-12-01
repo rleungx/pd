@@ -234,8 +234,6 @@ const (
 
 	defaultLogFormat = "text"
 
-	defaultMaxMovableHotPeerSize = int64(512)
-
 	defaultServerMemoryLimit            = 0
 	minServerMemoryLimit                = 0
 	maxServerMemoryLimit                = 0.99
