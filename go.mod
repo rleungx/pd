@@ -26,6 +26,7 @@ require (
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
+	github.com/mailru/easyjson v0.7.6
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
@@ -61,8 +62,6 @@ require (
 	google.golang.org/grpc v1.54.0
 	gotest.tools/gotestsum v1.7.0
 )
-
-require github.com/mailru/easyjson v0.7.6
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect

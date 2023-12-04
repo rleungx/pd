@@ -543,6 +543,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	cluster.HandleStatsAsync(c, region)
 
