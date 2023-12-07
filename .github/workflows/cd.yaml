@@ -54,6 +54,9 @@ jobs:
       - name: set-additional-tags
         if: ${{ github.ref == 'refs/heads/release-7.1-keyspace' && github.event_name == 'push' }}
         run: |
+          # Remove the local manifest entry if it exists
+          docker manifest rm hub.pingcap.net/keyspace/pd:v7.1.0 || true
+          
           docker manifest create hub.pingcap.net/keyspace/pd:v7.1.0 \
           --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64 \
           --amend hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
