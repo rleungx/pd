@@ -16,11 +16,16 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
     steps:
+      - name: Check out Code
+        uses: actions/checkout@v2
       - name: Build and Push Images
         uses: docker/build-push-action@v2
         with:
+          context: .
           platforms: "linux/arm64"
           push: true
+          secrets: |
+            GIT_AUTH_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           build-args: |
             GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-arm64
@@ -30,11 +35,16 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GIT_ACTION_BOT }}
     steps:
+      - name: Check out Code
+        uses: actions/checkout@v2
       - name: Build and Push Images
         uses: docker/build-push-action@v2
         with:
+          context: .
           platforms: "linux/amd64"
           push: true
+          secrets: |
+            GIT_AUTH_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           build-args: |
             GITHUB_TOKEN=${{ secrets.GIT_ACTION_BOT }}
           tags: hub.pingcap.net/sunxiaoguang/serverless/pd:${{ github.sha }}-amd64
