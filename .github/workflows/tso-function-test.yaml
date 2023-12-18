@@ -1,8 +1,5 @@
 name: TSO Function Test
 on:
-  push:
-    branches:
-      - release-7.1-keyspace
   pull_request:
     branches:
       - release-7.1-keyspace
@@ -13,10 +10,11 @@ jobs:
   tso-function-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.20.1"
       - name: Checkout code
         uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version-file: ./go.mod
+          cache-dependency-path: ./go.sum
       - name: Make TSO Function Test
         run: make test-tso-function
