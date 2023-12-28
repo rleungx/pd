@@ -18,14 +18,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
@@ -210,7 +210,7 @@ type SplitKeyspaceGroupByIDParams struct {
 }
 
 var patrolKeyspaceAssignmentState struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	patrolled bool
 }
 

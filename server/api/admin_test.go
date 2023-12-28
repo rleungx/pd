@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func (suite *adminTestSuite) TestDropRegion() {
 
 	// After drop region from cache, lower version is accepted.
 	url := fmt.Sprintf("%s/admin/cache/region/%d", suite.urlPrefix, region.GetID())
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	suite.NoError(err)
 	res, err := testDialClient.Do(req)
 	suite.NoError(err)
@@ -145,7 +146,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 
 	// After drop all regions from cache, lower version is accepted.
 	url := fmt.Sprintf("%s/admin/cache/regions", suite.urlPrefix)
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	suite.NoError(err)
 	res, err := testDialClient.Do(req)
 	suite.NoError(err)
@@ -188,9 +189,24 @@ func (suite *adminTestSuite) TestResetTS() {
 	values, err := json.Marshal(args)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.StatusOK(re),
-		tu.StringEqual(re, "\"Reset ts successfully.\"\n"))
+	tu.Eventually(re, func() bool {
+		resp, err := apiutil.PostJSON(testDialClient, url, values)
+		re.NoError(err)
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		switch resp.StatusCode {
+		case http.StatusOK:
+			re.Contains(string(b), "Reset ts successfully.")
+			return true
+		case http.StatusServiceUnavailable:
+			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
+			return false
+		default:
+			re.FailNow("unexpected status code %d", resp.StatusCode)
+			return false
+		}
+	})
 	suite.NoError(err)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
@@ -271,9 +287,8 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 	suite.NoError(err2)
 	suite.True(resp.Marked)
 	// unmark
-	code, err := apiutil.DoDelete(testDialClient, url)
+	err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(200, code)
 	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 }
@@ -310,9 +325,8 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 	suite.NoError(err2)
 	suite.Equal(id, uint64(99000001))
 	// unmark
-	code, err := apiutil.DoDelete(testDialClient, markRecoveringURL)
+	err := tu.CheckDelete(testDialClient, markRecoveringURL, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(200, code)
 	suite.NoError(tu.CheckGetJSON(testDialClient, markRecoveringURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),

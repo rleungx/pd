@@ -35,6 +35,8 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -67,7 +69,8 @@ func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.ClusterID = rand.Uint64()
-	suite.backendEndpoints, suite.etcdClient, suite.clean = startEmbeddedEtcd(t)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().LCUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
 }
 
@@ -749,7 +752,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	defer mgr.Close()
 
 	step := 30
-	mux := sync.Mutex{}
+	mux := syncutil.Mutex{}
 	wg := sync.WaitGroup{}
 	for i := 0; i < numberOfKeyspaceGroupsToAdd; i += step {
 		wg.Add(1)
@@ -870,12 +873,12 @@ func addKeyspaceGroupAssignment(
 	groupID uint32,
 	rootPath string,
 	svcAddrs []string,
-	priorites []int,
+	priorities []int,
 	keyspaces []uint32,
 ) error {
 	members := make([]endpoint.KeyspaceGroupMember, len(svcAddrs))
 	for i, svcAddr := range svcAddrs {
-		members[i] = endpoint.KeyspaceGroupMember{Address: svcAddr, Priority: priorites[i]}
+		members[i] = endpoint.KeyspaceGroupMember{Address: svcAddr, Priority: priorities[i]}
 	}
 	group := &endpoint.KeyspaceGroup{
 		ID:        groupID,
@@ -1221,14 +1224,12 @@ func waitForPrimariesServing(
 	re *require.Assertions, mgrs []*KeyspaceGroupManager, ids []uint32,
 ) {
 	testutil.Eventually(re, func() bool {
-		for i := 0; i < 100; i++ {
-			for j, id := range ids {
-				if member, err := mgrs[j].GetElectionMember(id, id); err != nil || !member.IsLeader() {
-					return false
-				}
-				if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
-					return false
-				}
+		for j, id := range ids {
+			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
+				return false
+			}
+			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
+				return false
 			}
 		}
 		return true

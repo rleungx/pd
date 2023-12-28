@@ -89,7 +89,7 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered from an unexpected panic", r)
+			suite.T().Log("Recovered from an unexpected panic", r)
 			suite.T().Errorf("Expected no panic, but something bad occurred with")
 		}
 	}()
@@ -106,23 +106,19 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
-	url := s.GetAddr() + tsoapi.APIPathPrefix
-	{
-		resetJSON := `{"tso":"121312", "force-use-larger":true}`
-		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
-		re.NoError(err)
-		defer resp.Body.Close()
-		re.Equal(http.StatusOK, resp.StatusCode)
-	}
-	{
-		resetJSON := `{}`
-		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
-		re.NoError(err)
-		defer resp.Body.Close()
-		re.Equal(http.StatusBadRequest, resp.StatusCode)
-	}
+
+	url := s.GetAddr() + tsoapi.APIPathPrefix + "/admin/reset-ts"
+	// Test reset ts
+	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
+	err = testutil.CheckPostJSON(dialClient, url, input,
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"))
+	suite.NoError(err)
+
+	// Test reset ts with invalid tso
+	input = []byte(`{}`)
+	err = testutil.CheckPostJSON(dialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
+	re.NoError(err)
 }
 
 func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
@@ -136,7 +132,7 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 	re.NoError(err)
 
 	// Setup the logger.
-	err = tests.InitLogger(cfg)
+	err = tests.InitLogger(cfg.Log, cfg.Logger, cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 
 	s, cleanup, err := tests.NewTSOTestServer(suite.ctx, cfg)
@@ -396,6 +392,11 @@ func (suite *APIServerForwardTestSuite) TestResignAPIPrimaryForward() {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+
 	for j := 0; j < 10; j++ {
 		suite.pdLeader.ResignLeader()
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
@@ -568,18 +569,6 @@ func (suite *CommonTestSuite) TestAdvertiseAddr() {
 
 	conf := suite.tsoDefaultPrimaryServer.GetConfig()
 	re.Equal(conf.GetListenAddr(), conf.GetAdvertiseListenAddr())
-}
-
-func (suite *CommonTestSuite) TestMetrics() {
-	re := suite.Require()
-
-	resp, err := http.Get(suite.tsoDefaultPrimaryServer.GetConfig().GetAdvertiseListenAddr() + "/metrics")
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-	respBytes, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	re.Contains(string(respBytes), "tso_server_info")
 }
 
 func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {

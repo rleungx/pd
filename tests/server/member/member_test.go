@@ -63,7 +63,7 @@ func TestMemberDelete(t *testing.T) {
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	leader := cluster.GetServer(leaderName)
+	leader := cluster.GetLeaderServer()
 	var members []*tests.TestServer
 	for _, s := range cluster.GetConfig().InitialServers {
 		if s.Name != leaderName {
@@ -88,7 +88,7 @@ func TestMemberDelete(t *testing.T) {
 		t.Log(time.Now(), "try to delete:", table.path)
 		testutil.Eventually(re, func() bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + table.path
-			req, err := http.NewRequest(http.MethodDelete, addr, nil)
+			req, err := http.NewRequest(http.MethodDelete, addr, http.NoBody)
 			re.NoError(err)
 			res, err := httpClient.Do(req)
 			re.NoError(err)
@@ -260,7 +260,7 @@ func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
-	memberID := cluster.GetServer(leader1).GetLeader().GetMemberId()
+	memberID := cluster.GetLeaderServer().GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))

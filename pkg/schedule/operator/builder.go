@@ -21,22 +21,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
-
-// ClusterInformer provides the necessary information for building operator.
-type ClusterInformer interface {
-	GetBasicCluster() *core.BasicCluster
-	GetOpts() config.Config
-	GetStoreConfig() config.StoreConfig
-	GetRuleManager() *placement.RuleManager
-	GetAllocator() id.Allocator
-}
 
 // Builder is used to create operators. Usage:
 //
@@ -50,7 +40,7 @@ type ClusterInformer interface {
 // according to various constraints.
 type Builder struct {
 	// basic info
-	ClusterInformer
+	sche.SharedCluster
 	desc            string
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
@@ -102,10 +92,10 @@ func SkipPlacementRulesCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
 		desc:            desc,
-		ClusterInformer: ci,
+		SharedCluster:   ci,
 		regionID:        region.GetID(),
 		regionEpoch:     region.GetRegionEpoch(),
 		approximateSize: region.GetApproximateSize(),
@@ -145,7 +135,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 
 	// placement rules
 	var rules []*placement.Rule
-	if err == nil && !b.skipPlacementRulesCheck && b.GetOpts().IsPlacementRulesEnabled() {
+	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
@@ -161,14 +151,14 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 	}
 
 	// build flags
-	supportConfChangeV2 := versioninfo.IsFeatureSupported(b.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
+	supportConfChangeV2 := versioninfo.IsFeatureSupported(b.GetSharedConfig().GetClusterVersion(), versioninfo.ConfChangeV2)
 
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.useJointConsensus = supportConfChangeV2 && b.GetOpts().IsUseJointConsensus()
+	b.useJointConsensus = supportConfChangeV2 && b.GetSharedConfig().IsUseJointConsensus()
 	b.err = err
 	return b
 }
@@ -403,7 +393,6 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	if brief, b.err = b.prepareBuild(); b.err != nil {
 		return nil, b.err
 	}
-
 	if b.useJointConsensus {
 		kind, b.err = b.buildStepsWithJointConsensus(kind)
 	} else {
@@ -493,7 +482,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				id, err := b.GetAllocator().Alloc()
+				id, err := b.AllocID()
 				if err != nil {
 					return "", err
 				}
@@ -549,6 +538,10 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
 	case len(b.toAdd) > 0:
 		return fmt.Sprintf("add peer: store %s", b.toAdd)
+	case len(b.toRemove) > 0 && len(b.toPromote) > 0:
+		return fmt.Sprintf("promote peer: store %s, rm peer: store %s", b.toRemove, b.toPromote)
+	case len(b.toRemove) > 0 && len(b.toDemote) > 0:
+		return fmt.Sprintf("demote peer: store %s, rm peer: store %s", b.toDemote, b.toRemove)
 	case len(b.toRemove) > 0:
 		return fmt.Sprintf("rm peer: store %s", b.toRemove)
 	case len(b.toPromote) > 0:
@@ -800,7 +793,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	var isDownStore bool
 	store := b.GetBasicCluster().GetStore(removeStoreID)
 	if store != nil {
-		isDownStore = store.DownTime() > b.GetOpts().GetMaxStoreDownTime()
+		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
 	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
 	delete(b.currentPeers, removeStoreID)
@@ -916,7 +909,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
-	if !stateFilter.Target(b.GetOpts(), store).IsOK() {
+	if !stateFilter.Target(b.GetSharedConfig(), store).IsOK() {
 		return false
 	}
 
@@ -1187,7 +1180,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	if sx == nil || sy == nil {
 		return 0
 	}
-	labels := b.GetOpts().GetLocationLabels()
+	labels := b.GetSharedConfig().GetLocationLabels()
 	for i, l := range labels {
 		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
 			return i

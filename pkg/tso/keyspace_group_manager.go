@@ -29,6 +29,7 @@ import (
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
@@ -42,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -61,7 +63,7 @@ const (
 )
 
 type state struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	// ams stores the allocator managers of the keyspace groups. Each keyspace group is
 	// assigned with an allocator manager managing its global/local tso allocators.
 	// Use a fixed size array to maximize the efficiency of concurrent access to
@@ -512,15 +514,13 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		kgm.etcdClient,
 		"tso-nodes-watcher",
 		kgm.tsoServiceKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
-
-	kgm.wg.Add(1)
-	go kgm.tsoNodesWatcher.StartWatchLoop()
-
+	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
 		return err
@@ -559,7 +559,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
-	postEventFn := func() error {
+	postEventsFn := func([]*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
@@ -573,9 +573,10 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.etcdClient,
 		"keyspace-watcher",
 		startKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		postEventFn,
+		postEventsFn,
 		clientv3.WithRange(endKey),
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {
@@ -587,10 +588,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	if kgm.loadKeyspaceGroupsBatchSize > 0 {
 		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
-
-	kgm.wg.Add(1)
-	go kgm.groupWatcher.StartWatchLoop()
-
+	kgm.groupWatcher.StartWatchLoop()
 	if err := kgm.groupWatcher.WaitLoad(); err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
@@ -742,10 +740,13 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		zap.String("participant-name", uniqueName),
 		zap.Uint64("participant-id", uniqueID))
 	// Initialize the participant info to join the primary election.
-	participant := member.NewParticipant(kgm.etcdClient)
-	participant.InitInfo(
-		uniqueName, uniqueID, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID),
-		mcsutils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
+	participant := member.NewParticipant(kgm.etcdClient, mcsutils.TSOServiceName)
+	p := &tsopb.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
+	}
+	participant.InitInfo(p, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), mcsutils.PrimaryKey, "keyspace group primary election")
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
@@ -1228,16 +1229,17 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	statusCode, err := apiutil.DoDelete(
+	resp, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
-	if statusCode != http.StatusOK {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		log.Warn("failed to finish split keyspace group",
 			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", statusCode))
+			zap.Int("status-code", resp.StatusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
@@ -1266,16 +1268,17 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	statusCode, err := apiutil.DoDelete(
+	resp, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
 	if err != nil {
 		return err
 	}
-	if statusCode != http.StatusOK {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		log.Warn("failed to finish merging keyspace group",
 			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", statusCode))
+			zap.Int("status-code", resp.StatusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	kgm.metrics.finishMergeSendDuration.Observe(time.Since(startRequest).Seconds())

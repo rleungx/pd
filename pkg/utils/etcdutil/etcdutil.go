@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
@@ -63,6 +64,11 @@ const (
 	DefaultSlowRequestTime = time.Second
 
 	healthyPath = "health"
+
+	// MaxEtcdTxnOps is the max value of operations in an etcd txn. The default limit of etcd txn op is 128.
+	// We use 120 here to leave some space for other operations.
+	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
+	MaxEtcdTxnOps = 120
 )
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
@@ -271,7 +277,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
+				log.Info("etcd client is closed, exit health check goroutine")
 				checker.Range(func(key, value interface{}) bool {
 					client := value.(*healthyClient)
 					client.Close()
@@ -288,7 +294,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
 					// and it cannot recover as soon as possible.
 					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
+						log.Info("no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
 						client.SetEndpoints([]string{}...)
 						client.SetEndpoints(usedEps...)
 					}
@@ -297,7 +303,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
 						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
+						log.Info("update endpoints", zap.String("num-change", change),
 							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
 					}
 					lastAvailable = time.Now()
@@ -314,7 +320,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit update endpoint goroutine")
+				log.Info("etcd client is closed, exit update endpoint goroutine")
 				return
 			case <-ticker.C:
 				eps := syncUrls(client)
@@ -383,7 +389,7 @@ func (checker *healthyChecker) update(eps []string) {
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
-				log.Info("[etcd client] some etcd server maybe offline", zap.String("endpoint", ep))
+				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
 				checker.removeClient(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
@@ -410,7 +416,7 @@ func (checker *healthyChecker) update(eps []string) {
 func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
-		log.Error("[etcd client] failed to create etcd healthy client", zap.Error(err))
+		log.Error("failed to create etcd healthy client", zap.Error(err))
 		return
 	}
 	checker.Store(ep, &healthyClient{
@@ -434,7 +440,7 @@ func syncUrls(client *clientv3.Client) []string {
 	defer cancel()
 	mresp, err := client.MemberList(ctx)
 	if err != nil {
-		log.Error("[etcd client] failed to list members", errs.ZapError(err))
+		log.Error("failed to list members", errs.ZapError(err))
 		return []string{}
 	}
 	var eps []string
@@ -458,12 +464,16 @@ func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *
 
 // createHTTPClient creates a http client with the given tls config.
 func createHTTPClient(tlsConfig *tls.Config) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	cli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		cli.Transport = transport
 	}
+	return cli
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
@@ -574,11 +584,13 @@ type LoopWatcher struct {
 	putFn func(*mvccpb.KeyValue) error
 	// deleteFn is used to handle the delete event.
 	deleteFn func(*mvccpb.KeyValue) error
-	// postEventFn is used to call after handling all events.
-	postEventFn func() error
+	// postEventsFn is used to call after handling all events.
+	postEventsFn func([]*clientv3.Event) error
+	// preEventsFn is used to call before handling all events.
+	preEventsFn func([]*clientv3.Event) error
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
-	forceLoadMu sync.RWMutex
+	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
 	lastTimeForceLoad time.Time
 
@@ -596,8 +608,15 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(
+	ctx context.Context, wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
+	opts ...clientv3.OpOption,
+) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
 		client:                   client,
@@ -609,7 +628,8 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		updateClientCh:           make(chan *clientv3.Client, 1),
 		putFn:                    putFn,
 		deleteFn:                 deleteFn,
-		postEventFn:              postEventFn,
+		postEventsFn:             postEventsFn,
+		preEventsFn:              preEventsFn,
 		opts:                     opts,
 		lastTimeForceLoad:        time.Now(),
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
@@ -621,36 +641,39 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
-	defer logutil.LogPanic()
-	defer lw.wg.Done()
+	lw.wg.Add(1)
+	go func() {
+		defer logutil.LogPanic()
+		defer lw.wg.Done()
 
-	ctx, cancel := context.WithCancel(lw.ctx)
-	defer cancel()
-	watchStartRevision := lw.initFromEtcd(ctx)
+		ctx, cancel := context.WithCancel(lw.ctx)
+		defer cancel()
+		watchStartRevision := lw.initFromEtcd(ctx)
 
-	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-			return
-		default:
+		log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+				return
+			default:
+			}
+			nextRevision, err := lw.watch(ctx, watchStartRevision)
+			if err != nil {
+				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
+					zap.String("name", lw.name),
+					zap.String("key", lw.key),
+					zap.Int64("next-revision", nextRevision),
+					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
+					zap.Error(err))
+				watchStartRevision = nextRevision
+				time.Sleep(lw.watchChangeRetryInterval)
+				failpoint.Inject("updateClient", func() {
+					lw.client = <-lw.updateClientCh
+				})
+			}
 		}
-		nextRevision, err := lw.watch(ctx, watchStartRevision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
-				zap.String("name", lw.name),
-				zap.String("key", lw.key),
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-				zap.Error(err))
-			watchStartRevision = nextRevision
-			time.Sleep(lw.watchChangeRetryInterval)
-			failpoint.Inject("updateClient", func() {
-				lw.client = <-lw.updateClientCh
-			})
-		}
-	}
+	}()
 }
 
 func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
@@ -750,7 +773,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			revision, err = lw.load(ctx)
 			if err != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(err))
+			} else {
+				log.Info("force load key successfully in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
 			}
 			continue
 		case <-ticker.C:
@@ -792,28 +818,34 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				goto watchChanLoop
 			}
+			if err := lw.preEventsFn(wresp.Events); err != nil {
+				log.Error("run pre event failed in watch loop", zap.Error(err),
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+			}
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
 						log.Error("put failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("put in watch loop", zap.String("name", lw.name),
+						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("delete in watch loop", zap.String("name", lw.name),
+						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
 				}
 			}
-			if err := lw.postEventFn(); err != nil {
+			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
@@ -833,6 +865,16 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	if limit != 0 {
 		limit++
 	}
+	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
+		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
+			zap.String("key", lw.key), zap.Error(err))
+	}
+	defer func() {
+		if err := lw.postEventsFn([]*clientv3.Event{}); err != nil {
+			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+				zap.String("key", lw.key), zap.Error(err))
+		}
+	}()
 	for {
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
@@ -852,15 +894,15 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			err = lw.putFn(item)
 			if err != nil {
-				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
+			} else {
+				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			if err := lw.postEventFn(); err != nil {
-				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
-			}
 			return resp.Header.Revision + 1, err
 		}
 	}

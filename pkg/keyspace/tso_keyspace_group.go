@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -60,7 +61,7 @@ type GroupManager struct {
 	client    *clientv3.Client
 	clusterID uint64
 
-	sync.RWMutex
+	syncutil.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
@@ -105,8 +106,7 @@ func NewKeyspaceGroupManager(
 	// The PD(TSO) Client relies on this info to discover tso servers.
 	if m.client != nil {
 		m.initTSONodesWatcher(m.client, m.clusterID)
-		m.wg.Add(1)
-		go m.tsoNodesWatcher.StartWatchLoop()
+		m.tsoNodesWatcher.StartWatchLoop()
 	}
 	return m
 }
@@ -245,9 +245,10 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID ui
 		client,
 		"tso-nodes-watcher",
 		tsoServiceKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
 }
@@ -914,7 +915,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	//   - Load and delete the keyspace groups in the merge list.
 	//   - Load and update the target keyspace group.
 	// So we pre-check the number of operations to avoid exceeding the maximum number of etcd transaction.
-	if (mergeListNum+1)*2 > MaxEtcdTxnOps {
+	if (mergeListNum+1)*2 > etcdutil.MaxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
 	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
@@ -1061,7 +1062,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			continue
 		}
 		var (
-			maxBatchSize  = MaxEtcdTxnOps/2 - 1
+			maxBatchSize  = etcdutil.MaxEtcdTxnOps/2 - 1
 			groupsToMerge = make([]uint32, 0, maxBatchSize)
 		)
 		for idx, group := range groups.GetAll() {

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -439,7 +440,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -454,7 +455,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 	// Patrol the keyspace assignment.
@@ -464,7 +465,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 }
@@ -472,7 +473,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -487,14 +488,14 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
-	// Patrol the keyspace assignment with range [MaxEtcdTxnOps/2, MaxEtcdTxnOps/2+MaxEtcdTxnOps+1]
+	// Patrol the keyspace assignment with range [ etcdutil.MaxEtcdTxnOps/2,  etcdutil.MaxEtcdTxnOps/2+ etcdutil.MaxEtcdTxnOps+1]
 	// to make sure the range crossing the boundary of etcd transaction operation limit.
 	var (
-		startKeyspaceID = uint32(MaxEtcdTxnOps / 2)
-		endKeyspaceID   = startKeyspaceID + MaxEtcdTxnOps + 1
+		startKeyspaceID = uint32(etcdutil.MaxEtcdTxnOps / 2)
+		endKeyspaceID   = startKeyspaceID + etcdutil.MaxEtcdTxnOps + 1
 	)
 	err = suite.manager.PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID)
 	re.NoError(err)
@@ -502,7 +503,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		keyspaceID := uint32(i)
 		if keyspaceID >= startKeyspaceID && keyspaceID <= endKeyspaceID {
 			re.Contains(defaultKeyspaceGroup.Keyspaces, keyspaceID)

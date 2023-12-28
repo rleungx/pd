@@ -12,9 +12,9 @@ replace (
 replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
 require (
-	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230925123611-87bebcc0d071
-	github.com/stretchr/testify v1.8.2
+	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c
+	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
+	github.com/stretchr/testify v1.8.4
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/tests/integrations/mcs v0.0.0-00010101000000-000000000000
@@ -160,14 +160,14 @@ require (
 	go.uber.org/goleak v1.1.12 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
-	golang.org/x/crypto v0.1.0 // indirect
-	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a // indirect
+	golang.org/x/crypto v0.14.0 // indirect
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.5.0 // indirect
-	golang.org/x/net v0.10.0 // indirect
+	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.4.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.8.0 // indirect
-	golang.org/x/text v0.9.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.1.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect

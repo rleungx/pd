@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -34,9 +33,9 @@ type evictSlowStoreTestSuite struct {
 	suite.Suite
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	es     schedule.Scheduler
-	bs     schedule.Scheduler
-	oc     *schedule.OperatorController
+	es     Scheduler
+	bs     Scheduler
+	oc     *operator.Controller
 }
 
 func TestEvictSlowStoreTestSuite(t *testing.T) {
@@ -57,9 +56,9 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = schedule.CreateScheduler(EvictSlowStoreType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
+	suite.es, err = CreateScheduler(EvictSlowStoreType, suite.oc, storage, ConfigSliceDecoder(EvictSlowStoreType, []string{}), nil)
 	suite.NoError(err)
-	suite.bs, err = schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}), nil)
 	suite.NoError(err)
 }
 
@@ -68,6 +67,7 @@ func (suite *evictSlowStoreTestSuite) TearDownTest() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 100
@@ -100,7 +100,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	suite.Zero(es2.conf.evictStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
+	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfigs()
 	suite.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {
@@ -114,6 +114,8 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	suite.NoError(err)
 	suite.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	suite.Zero(persistValue.evictStore())
+	suite.True(persistValue.readyForRecovery())
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
@@ -121,12 +123,13 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	suite.True(ok)
 	suite.Zero(es2.conf.evictStore())
 	// prepare with no evict store.
-	suite.es.Prepare(suite.tc)
+	suite.es.PrepareConfig(suite.tc)
 
 	es2.conf.setStoreAndPersist(1)
 	suite.Equal(uint64(1), es2.conf.evictStore())
+	suite.False(es2.conf.readyForRecovery())
 	// prepare with evict store.
-	suite.es.Prepare(suite.tc)
+	suite.es.PrepareConfig(suite.tc)
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {

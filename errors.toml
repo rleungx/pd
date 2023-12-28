@@ -16,6 +16,11 @@ error = '''
 redirect failed
 '''
 
+["PD:apiutil:ErrRedirectToNotLeader"]
+error = '''
+redirect to not leader
+'''
+
 ["PD:autoscaling:ErrEmptyMetricsResponse"]
 error = '''
 metrics response from Prometheus is empty
@@ -94,6 +99,11 @@ invalid store id %d, not found
 ["PD:cluster:ErrNotBootstrapped"]
 error = '''
 TiKV cluster not bootstrapped, please start TiKV first
+'''
+
+["PD:cluster:ErrSchedulingIsHalted"]
+error = '''
+scheduling is halted
 '''
 
 ["PD:cluster:ErrStoreIsUp"]
@@ -486,6 +496,16 @@ error = '''
 init file log error, %s
 '''
 
+["PD:mcs:ErrNotFoundSchedulingAddr"]
+error = '''
+cannot find scheduling address
+'''
+
+["PD:mcs:ErrSchedulingServer"]
+error = '''
+scheduling server meets %v
+'''
+
 ["PD:member:ErrCheckCampaign"]
 error = '''
 check campaign failed
@@ -506,6 +526,21 @@ error = '''
 TCP socks error
 '''
 
+["PD:operator:ErrAddOperator"]
+error = '''
+failed to add operator, maybe already have one
+'''
+
+["PD:operator:ErrOperatorNotFound"]
+error = '''
+operator not found
+'''
+
+["PD:operator:ErrPluginNotFound"]
+error = '''
+plugin is not found: %s
+'''
+
 ["PD:os:ErrOSOpen"]
 error = '''
 open error
@@ -514,6 +549,11 @@ open error
 ["PD:placement:ErrBuildRuleList"]
 error = '''
 build rule list failed, %s
+'''
+
+["PD:placement:ErrKeyFormat"]
+error = '''
+key should be in hex format, %s
 '''
 
 ["PD:placement:ErrLoadRule"]
@@ -526,9 +566,19 @@ error = '''
 load rule group failed
 '''
 
+["PD:placement:ErrPlacementDisabled"]
+error = '''
+placement rules feature is disabled
+'''
+
 ["PD:placement:ErrRuleContent"]
 error = '''
 invalid rule content, %s
+'''
+
+["PD:placement:ErrRuleNotFound"]
+error = '''
+rule not found
 '''
 
 ["PD:plugin:ErrLoadPlugin"]
@@ -574,6 +624,26 @@ failed to marshal proto
 ["PD:proto:ErrProtoUnmarshal"]
 error = '''
 failed to unmarshal proto
+'''
+
+["PD:region:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionInvalidID"]
+error = '''
+invalid region id
+'''
+
+["PD:region:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:region:ErrRegionNotFound"]
+error = '''
+region %v not found
 '''
 
 ["PD:region:ErrRegionRuleContent"]

@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -50,20 +49,22 @@ import (
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
-	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
+	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"              // init tso API group
+	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -71,12 +72,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -100,7 +101,7 @@ const (
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
 	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API service"
+	APIServiceMode = "API Service"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -190,7 +191,7 @@ type Server struct {
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
 	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks []func(context.Context)
+	leaderCallbacks []func(context.Context) error
 	// closeCallbacks will be called before the server is closed.
 	closeCallbacks []func()
 
@@ -200,7 +201,7 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		clients map[string]tsopb.TSO_TsoClient
 	}
 
@@ -222,10 +223,11 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry          *registry.ServiceRegistry
-	mode              string
-	servicePrimaryMap sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher *etcdutil.LoopWatcher
+	registry                 *registry.ServiceRegistry
+	mode                     string
+	servicePrimaryMap        sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher        *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher *etcdutil.LoopWatcher
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -253,7 +255,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
-			sync.RWMutex
+			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
 		}{
 			clients: make(map[string]tsopb.TSO_TsoClient),
@@ -412,7 +414,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
@@ -455,7 +457,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg, s.persistOptions)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -469,13 +471,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
+
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
 		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
+
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
@@ -533,8 +537,10 @@ func (s *Server) Close() {
 		log.Error("close storage meet error", errs.ZapError(err))
 	}
 
-	if err := s.hotRegionStorage.Close(); err != nil {
-		log.Error("close hot region storage meet error", errs.ZapError(err))
+	if s.hotRegionStorage != nil {
+		if err := s.hotRegionStorage.Close(); err != nil {
+			log.Error("close hot region storage meet error", errs.ZapError(err))
+		}
 	}
 
 	// Run callbacks
@@ -602,8 +608,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
-		s.serverLoopWg.Add(1)
-		go s.tsoPrimaryWatcher.StartWatchLoop()
+		s.initSchedulingPrimaryWatcher()
 	}
 }
 
@@ -922,24 +927,11 @@ func (s *Server) GetConfig() *config.Config {
 	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := s.storage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
 	if err != nil {
 		return cfg
 	}
-	payload := make(map[string]interface{})
-	for i, sche := range sches {
-		var config interface{}
-		err := schedule.DecodeConfig([]byte(configs[i]), &config)
-		if err != nil {
-			log.Error("failed to decode scheduler config",
-				zap.String("config", configs[i]),
-				zap.String("scheduler", sche),
-				errs.ZapError(err))
-			continue
-		}
-		payload[sche] = config
-	}
-	cfg.Schedule.SchedulersPayload = payload
+	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
 }
 
@@ -969,12 +961,12 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 }
 
 // GetScheduleConfig gets the balance config information.
-func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
+func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
+func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -997,12 +989,12 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 }
 
 // GetReplicationConfig get the replication config.
-func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
+func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
-func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
+func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -1324,6 +1316,15 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
+// IsServiceIndependent returns if the service is enabled
+func (s *Server) IsServiceIndependent(name string) bool {
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.IsServiceIndependent(name)
+	}
+	return false
+}
+
 // GetServiceLabels returns ApiAccessPaths by given service label
 // TODO: this function will be used for updating api rate limit config
 func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
@@ -1399,22 +1400,13 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
-	if !isLevelLegal(level) {
+	if !logutil.IsLevelLegal(level) {
 		return errors.Errorf("log level %s is illegal", level)
 	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 	return nil
-}
-
-func isLevelLegal(level string) bool {
-	switch strings.ToLower(level) {
-	case "fatal", "error", "warn", "warning", "debug", "info":
-		return true
-	default:
-		return false
-	}
 }
 
 // GetReplicationModeConfig returns the replication mode config.
@@ -1468,7 +1460,7 @@ func (s *Server) IsServing() bool {
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
@@ -1632,6 +1624,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
 	if !s.IsAPIServiceMode() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
@@ -1641,6 +1634,7 @@ func (s *Server) campaignLeader() {
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
 	CheckPDVersion(s.persistOptions)
@@ -1750,7 +1744,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 	}
 	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
-	req.Header.Set("PD-Allow-follower-handle", "true")
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 	res, err := s.httpClient.Do(req)
 	if err != nil {
 		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
@@ -1862,8 +1856,20 @@ func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
 	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
+	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
+	s.tsoPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initSchedulingPrimaryWatcher() {
+	serviceName := mcs.SchedulingServiceName
+	primaryKey := endpoint.SchedulingPrimaryPath(s.clusterID)
+	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.schedulingPrimaryWatcher.StartWatchLoop()
+}
+
+func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		primary := &tsopb.Participant{} // TODO: use Generics
+		primary := member.NewParticipantByService(serviceName)
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
 			return err
 		}
@@ -1871,7 +1877,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		if len(listenUrls) > 0 {
 			// listenUrls[0] is the primary service endpoint of the keyspace group
 			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-			log.Info("update tso primary", zap.String("primary", listenUrls[0]))
+			log.Info("update service primary", zap.String("service-name", serviceName), zap.String("primary", listenUrls[0]))
 		}
 		return nil
 	}
@@ -1881,19 +1887,21 @@ func (s *Server) initTSOPrimaryWatcher() {
 		if ok {
 			oldPrimary = v.(string)
 		}
-		log.Info("delete tso primary", zap.String("old-primary", oldPrimary))
+		log.Info("delete service primary", zap.String("service-name", serviceName), zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
-	s.tsoPrimaryWatcher = etcdutil.NewLoopWatcher(
+	name := fmt.Sprintf("%s-primary-watcher", serviceName)
+	return etcdutil.NewLoopWatcher(
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
-		"tso-primary-watcher",
-		tsoServicePrimaryKey,
+		name,
+		primaryKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 	)
 }
 

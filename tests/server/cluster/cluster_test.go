@@ -35,8 +35,11 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -44,8 +47,8 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/server/api"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -70,7 +73,7 @@ func TestBootstrap(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 
@@ -110,7 +113,7 @@ func TestDamagedRegion(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -190,7 +193,7 @@ func TestStaleRegion(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -235,7 +238,7 @@ func TestGetPutConfig(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -294,15 +297,15 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	rc.GetAllocator().Alloc()
-	id, err := rc.GetAllocator().Alloc()
+	rc.AllocID()
+	id, err := rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is up will fail.
 	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Offline)
@@ -310,7 +313,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Tombstone)
@@ -319,7 +322,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
@@ -350,11 +353,11 @@ func getTestDeployPath(storeID uint64) string {
 func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID uint64, state metapb.StoreState) {
 	store := rc.GetStore(storeID)
 	re.NotNil(store)
-	newStore := store.Clone(core.OfflineStore(false))
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	if state == metapb.StoreState_Up {
-		newStore = newStore.Clone(core.UpStore())
+		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Up))
 	} else if state == metapb.StoreState_Tombstone {
-		newStore = newStore.Clone(core.TombstoneStore())
+		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	}
 
 	rc.GetBasicCluster().PutStore(newStore)
@@ -464,7 +467,7 @@ func TestRaftClusterRestart(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -494,7 +497,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -507,6 +510,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	err = rc.PutStore(store)
 	re.NoError(err)
 	re.NotNil(tc)
+	rc.Stop()
 
 	// let the job run at small interval
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
@@ -514,8 +518,6 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 		err = rc.Start(leaderServer.GetServer())
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
-		rc = leaderServer.GetRaftCluster()
-		re.NotNil(rc)
 		rc.Stop()
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
@@ -537,7 +539,7 @@ func TestGetPDMembers(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID)}
@@ -581,7 +583,7 @@ func TestStoreVersionChange(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -619,14 +621,13 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -737,7 +738,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -808,12 +809,12 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(err)
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err := rc.LoadClusterInfo()
 	re.NoError(err)
 	re.Nil(raftCluster)
@@ -831,7 +832,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(testStorage.SaveStore(store))
+		re.NoError(testStorage.SaveStoreMeta(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -850,8 +851,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 	re.NoError(testStorage.Flush())
 
-	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster, svr.GetKeyspaceGroupManager())
+	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), basicCluster, testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -862,7 +863,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, store := range raftCluster.GetMetaStores() {
 		re.Equal(stores[store.GetId()], store)
 	}
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 	for _, region := range raftCluster.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -883,7 +884,7 @@ func TestLoadClusterInfo(t *testing.T) {
 		re.NoError(testStorage.SaveRegion(region))
 	}
 	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 }
 
 func TestTiFlashWithPlacementRules(t *testing.T) {
@@ -896,7 +897,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -922,7 +923,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
@@ -949,7 +950,7 @@ func TestReplicationModeStatus(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := newBootstrapRequest(clusterID)
@@ -1049,14 +1050,13 @@ func TestOfflineStoreLimit(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -1142,13 +1142,12 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
@@ -1171,7 +1170,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	scheduleCfg := rc.GetScheduleConfig().Clone()
-	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
+	scheduleCfg.StoreLimit = map[uint64]sc.StoreLimitConfig{}
 	re.NoError(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg))
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -1201,14 +1200,13 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -1278,6 +1276,119 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re.NoError(err)
 }
 
+func TestTransferLeaderForScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	// start
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	rc := leaderServer.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+
+	storesNum := 2
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	for i := 1; i <= storesNum; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i),
+			Address: "127.0.0.1:" + strconv.Itoa(i),
+		}
+		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	}
+	// region heartbeat
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Add evict leader scheduler
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 2,
+	})
+	// Check scheduler updated.
+	schedulersController := rc.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	rc.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetLeaderServer()
+	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1.Start(leaderServer.GetServer())
+	re.NoError(err)
+	re.NotNil(rc1)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc1, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated.
+	schedulersController = rc1.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	rc1.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetLeaderServer()
+	rc = leaderServer.GetServer().GetRaftCluster()
+	rc.Start(leaderServer.GetServer())
+	re.NotNil(rc)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated
+	schedulersController = rc.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
+func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
+	testutil.Eventually(re, func() bool {
+		if !exist {
+			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+		}
+		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+	})
+}
+
+func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
+	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	re.True(ok)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	re.True(ok)
+	var evictStoreIDs []uint64
+	testutil.Eventually(re, func() bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == len(expected)
+	})
+	re.ElementsMatch(evictStoreIDs, expected)
+}
+
 func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
 	for i := 0; i < 3; i++ {
 		regionID, err := id.Alloc()
@@ -1290,7 +1401,7 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0], core.SetSource(core.Heartbeat)))
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -1330,7 +1441,7 @@ func TestMinResolvedTS(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	id := leaderServer.GetAllocator()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
@@ -1435,10 +1546,10 @@ func TestTransferLeaderBack(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
+	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
 	re.NoError(storage.SaveMeta(meta))
@@ -1450,7 +1561,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(storage.SaveStoreMeta(store))
 	}
 	rc, err = rc.LoadClusterInfo()
 	re.NoError(err)
@@ -1462,7 +1573,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	// transfer PD leader to another PD
 	tc.ResignLeader()
 	tc.WaitLeader()
-	leaderServer = tc.GetServer(tc.GetLeader())
+	leaderServer = tc.GetLeaderServer()
 	svr1 := leaderServer.GetServer()
 	rc1 := svr1.GetRaftCluster()
 	re.NoError(err)
@@ -1475,7 +1586,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	// transfer PD leader back to the previous PD
 	tc.ResignLeader()
 	tc.WaitLeader()
-	leaderServer = tc.GetServer(tc.GetLeader())
+	leaderServer = tc.GetLeaderServer()
 	svr = leaderServer.GetServer()
 	rc = svr.GetRaftCluster()
 	re.NotNil(rc)
@@ -1495,7 +1606,7 @@ func TestExternalTimestamp(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
