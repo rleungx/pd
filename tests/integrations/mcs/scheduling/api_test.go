@@ -71,9 +71,11 @@ func (suite *apiTestSuite) SetupTest() {
 	suite.NoError(err)
 	suite.cluster.SetSchedulingCluster(tc)
 	tc.WaitForPrimaryServing(suite.Require())
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
 }
 
 func (suite *apiTestSuite) TearDownTest() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
 	suite.cluster.Destroy()
 	suite.cleanupFunc()
 }
@@ -122,10 +124,6 @@ func (suite *apiTestSuite) TestGetCheckerByName() {
 
 func (suite *apiTestSuite) TestAPIForward() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
-	}()
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", suite.backendEndpoints)
 	var slice []string
@@ -299,7 +297,7 @@ func (suite *apiTestSuite) TestAPIForward() {
 	rulesArgs, err := json.Marshal(rules)
 	suite.NoError(err)
 
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "/config/rules"), &rules,
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), rulesArgs,
@@ -539,4 +537,52 @@ func TestStatus(t *testing.T) {
 	}
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.RunTestInAPIMode(checkStatus)
+}
+
+func TestFollowerForward(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
+	checkFollowerForward := func(cluster *tests.TestCluster) {
+		leaderAddr := cluster.GetLeaderServer().GetAddr()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		follower, err := cluster.JoinAPIServer(ctx)
+		re.NoError(err)
+		re.NoError(follower.Run())
+		re.NotEmpty(cluster.WaitLeader())
+
+		followerAddr := follower.GetAddr()
+		if cluster.GetLeaderServer().GetAddr() != leaderAddr {
+			followerAddr = leaderAddr
+		}
+
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1", followerAddr)
+		rules := []*placement.Rule{}
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			// follower will forward to scheduling server directly
+			re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+			err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
+				testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
+			)
+			re.NoError(err)
+		} else {
+			// follower will forward to leader server
+			re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+			err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
+				testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader),
+			)
+			re.NoError(err)
+		}
+
+		// follower will forward to leader server
+		re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+		results := make(map[string]interface{})
+		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config"), &results,
+			testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader),
+		)
+		re.NoError(err)
+	}
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.RunTestInTwoModes(checkFollowerForward)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
 }
