@@ -71,10 +71,13 @@ func (suite *apiTestSuite) SetupTest() {
 	suite.NoError(err)
 	suite.cluster.SetSchedulingCluster(tc)
 	tc.WaitForPrimaryServing(suite.Require())
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", "return(true)"))
 }
 
 func (suite *apiTestSuite) TearDownTest() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
 	suite.cluster.Destroy()
 	suite.cleanupFunc()

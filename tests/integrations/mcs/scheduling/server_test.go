@@ -59,6 +59,7 @@ func TestServerTestSuite(t *testing.T) {
 func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -70,13 +71,15 @@ func (suite *serverTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.NoError(suite.pdLeader.BootstrapCluster())
+	re.NoError(suite.pdLeader.BootstrapCluster())
 }
 
 func (suite *serverTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.cluster.Destroy()
 	suite.cancel()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -132,6 +135,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
+	primary.GetCluster().SetPrepared()
 	oldPrimaryAddr := primary.GetAddr()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
@@ -142,6 +146,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary.Close()
 	tc.WaitForPrimaryServing(re)
 	primary = tc.GetPrimaryServer()
+	primary.GetCluster().SetPrepared()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
 	testutil.Eventually(re, func() bool {
@@ -246,7 +251,9 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+	primary := tc.GetPrimaryServer()
+	primary.GetCluster().SetPrepared()
+	schedulersController := primary.GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the API server.
 	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{

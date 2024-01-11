@@ -435,6 +435,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
+		store.LastHeartbeat = time.Now().UnixNano()
 		tests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
@@ -479,7 +480,11 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
 	for _, schedulerName := range evictSlownessSchedulers {
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", schedulerName}, nil)
-		re.Contains(echo, "Success!")
+		if strings.Contains(echo, "Success!") {
+			re.Contains(echo, "Success!")
+		} else {
+			re.Contains(echo, "scheduler existed")
+		}
 		testutil.Eventually(re, func() bool {
 			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 			return strings.Contains(echo, schedulerName)

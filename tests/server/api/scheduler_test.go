@@ -44,6 +44,18 @@ func TestScheduleTestSuite(t *testing.T) {
 	suite.Run(t, new(scheduleTestSuite))
 }
 
+func (suite *scheduleTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+}
+
+func (suite *scheduleTestSuite) TearDownSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
 func (suite *scheduleTestSuite) TestOriginAPI() {
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInTwoModes(suite.checkOriginAPI)
@@ -565,10 +577,8 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInTwoModes(suite.checkDisable)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
