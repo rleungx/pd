@@ -58,8 +58,10 @@ const (
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
 	XRealIPHeader = "X-Real-Ip"
-	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
-	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
+	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
+	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
 
 	chunkSize = 4096
 )

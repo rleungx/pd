@@ -40,6 +40,13 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const (
+	// DefaultGroupID is the default rule group ID.
+	DefaultGroupID = "pd"
+	// DefaultRuleID is the default rule ID.
+	DefaultRuleID = "default"
+)
+
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
