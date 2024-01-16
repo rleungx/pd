@@ -1902,6 +1902,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 }
 
