@@ -214,7 +214,7 @@ func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "true")
 	re.NoError(err)
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		// wait for the scheduler server to update the config
+		// wait for the scheduling server to update the config
 		testutil.Eventually(re, func() bool {
 			return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
 		})
