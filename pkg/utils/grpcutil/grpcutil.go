@@ -56,8 +56,8 @@ type TLSConfig struct {
 	SSLKEYBytes  []byte
 }
 
-// ToTLSConfig generates tls config.
-func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
+// ToClientTLSConfig generates tls config.
+func (s TLSConfig) ToClientTLSConfig() (*tls.Config, error) {
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
 		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
 		if err != nil {
@@ -93,6 +93,30 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	return tlsConfig, nil
+}
+
+// ToServerTLSConfig generates tls config.
+func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	allowedCN, err := s.GetOneAllowedCN()
+	if err != nil {
+		return nil, err
+	}
+
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCN:     allowedCN,
+	}
+
+	tlsConfig, err := tlsInfo.ServerConfig()
 	if err != nil {
 		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
@@ -172,7 +196,7 @@ func GetForwardedHost(ctx context.Context) string {
 }
 
 func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	tlsCfg, err := tlsConfig.ToTLSConfig()
+	tlsCfg, err := tlsConfig.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}

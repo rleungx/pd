@@ -324,7 +324,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 }
 
 func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -386,7 +386,7 @@ func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
 }
 
 func (s *Server) startElectionClient() (*clientv3.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}

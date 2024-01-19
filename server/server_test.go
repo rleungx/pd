@@ -166,7 +166,7 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 	suite.NoError(err)
 	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
 	suite.NoError(err)
-	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
+	tlsConfig, err := svr.cfg.Security.ToClientTLSConfig()
 	suite.NoError(err)
 	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
 	suite.Error(err)

@@ -169,7 +169,7 @@ func isAPIServiceReady(s server) (bool, error) {
 
 // InitClient initializes the etcd and http clients.
 func InitClient(s server) error {
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return err
 	}

@@ -35,7 +35,7 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	dashboardCfg.PublicPathPrefix = cfg.Dashboard.PublicPathPrefix
 	dashboardCfg.EnableTelemetry = cfg.Dashboard.EnableTelemetry
 	dashboardCfg.EnableExperimental = cfg.Dashboard.EnableExperimental
-	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
+	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToClientTLSConfig(); err != nil {
 		return nil, err
 	}
 	if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {
