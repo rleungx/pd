@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -168,7 +169,7 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		regions := &api.RegionsInfo{}
+		regions := &response.RegionsInfo{}
 		re.NoError(json.Unmarshal(output, regions))
 		pdctl.CheckRegionsInfo(re, regions, testCase.expect)
 	}
@@ -191,7 +192,7 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		region := &api.RegionInfo{}
+		region := &response.RegionInfo{}
 		re.NoError(json.Unmarshal(output, region))
 		pdctl.CheckRegionInfo(re, region, testCase.expect)
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -115,7 +116,7 @@ func (suite *storeTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Store) {
+func checkStoresInfo(re *require.Assertions, ss []*response.StoreInfo, want []*metapb.Store) {
 	re.Len(ss, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
@@ -134,23 +135,35 @@ func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Sto
 
 func (suite *storeTestSuite) TestStoresList() {
 	url := fmt.Sprintf("%s/stores", suite.urlPrefix)
-	info := new(StoresInfo)
+	info := new(response.StoresInfo)
 	re := suite.Require()
 	err := tu.ReadGetJSON(re, testDialClient, url, info)
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:3])
 
 	url = fmt.Sprintf("%s/stores?state=0", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:2])
 
 	url = fmt.Sprintf("%s/stores?state=1", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:3])
+
+	url = fmt.Sprintf("%s/stores?state=2", suite.urlPrefix)
+	info = new(response.StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	re.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[3:])
+
+	url = fmt.Sprintf("%s/stores?state=2&state=1", suite.urlPrefix)
+	info = new(response.StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	re.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[2:])
 }
 
 func (suite *storeTestSuite) TestStoreGet() {
@@ -166,20 +179,20 @@ func (suite *storeTestSuite) TestStoreGet() {
 			},
 		},
 	)
-	info := new(StoreInfo)
+	info := new(response.StoreInfo)
 	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, info)
 	suite.NoError(err)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
 	suite.Equal(capacity, int64(info.Status.Capacity))
 	suite.Equal(available, int64(info.Status.Available))
-	checkStoresInfo(suite.Require(), []*StoreInfo{info}, suite.stores[:1])
+	checkStoresInfo(suite.Require(), []*response.StoreInfo{info}, suite.stores[:1])
 }
 
 func (suite *storeTestSuite) TestStoreLabel() {
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	re := suite.Require()
-	var info StoreInfo
+	var info response.StoreInfo
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
 	suite.NoError(err)
 	suite.Empty(info.Store.Labels)
@@ -276,7 +289,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	}
 	// store 6 origin status:offline
 	url := fmt.Sprintf("%s/store/6", suite.urlPrefix)
-	store := new(StoreInfo)
+	store := new(response.StoreInfo)
 	err := tu.ReadGetJSON(re, testDialClient, url, store)
 	suite.NoError(err)
 	suite.False(store.Store.PhysicallyDestroyed)
@@ -288,7 +301,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 
 	status = suite.requestStatusBody(testDialClient, http.MethodGet, url)
 	suite.Equal(http.StatusOK, status)
-	store = new(StoreInfo)
+	store = new(response.StoreInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
 	suite.NoError(err)
 	suite.Equal(metapb.StoreState_Up, store.Store.State)
@@ -317,13 +330,13 @@ func (suite *storeTestSuite) TestStoreSetState() {
 		mustPutStore(re, suite.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	}
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
-	info := StoreInfo{}
+	info := response.StoreInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
 	suite.NoError(err)
 	suite.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
 	suite.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -331,14 +344,14 @@ func (suite *storeTestSuite) TestStoreSetState() {
 	suite.Equal(metapb.StoreState_Offline, info.Store.State)
 
 	// store not found
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
 	suite.NoError(err)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
-		info = StoreInfo{}
+		info = response.StoreInfo{}
 		err = tu.CheckPostJSON(testDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
 		suite.NoError(err)
 		err := tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -347,7 +360,7 @@ func (suite *storeTestSuite) TestStoreSetState() {
 	}
 
 	// Set back to Up.
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
 	suite.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -407,16 +420,16 @@ func (suite *storeTestSuite) TestDownState() {
 		core.SetStoreStats(&pdpb.StoreStats{}),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	storeInfo := newStoreInfo(suite.svr.GetScheduleConfig(), store)
+	storeInfo := response.BuildStoreInfo(suite.svr.GetScheduleConfig(), store)
 	suite.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
 
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
-	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	suite.Equal(disconnectedName, storeInfo.Store.StateName)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	suite.Equal(response.DisconnectedName, storeInfo.Store.StateName)
 
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
-	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	suite.Equal(downStateName, storeInfo.Store.StateName)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	suite.Equal(response.DownStateName, storeInfo.Store.StateName)
 }
 
 func (suite *storeTestSuite) TestGetAllLimit() {

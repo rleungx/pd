@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -43,9 +43,9 @@ func TestStore(t *testing.T) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*api.StoreInfo{
+	stores := []*response.StoreInfo{
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            1,
 					State:         metapb.StoreState_Up,
@@ -56,7 +56,7 @@ func TestStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            3,
 					State:         metapb.StoreState_Up,
@@ -67,7 +67,7 @@ func TestStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            2,
 					State:         metapb.StoreState_Tombstone,
@@ -91,7 +91,7 @@ func TestStore(t *testing.T) {
 	args := []string{"-u", pdAddr, "store"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo := new(api.StoresInfo)
+	storesInfo := new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	pdctl.CheckStoresInfo(re, storesInfo.Stores, stores[:2])
@@ -101,7 +101,7 @@ func TestStore(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NotContains(string(output), "\"state\":")
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	pdctl.CheckStoresInfo(re, storesInfo.Stores, stores)
@@ -110,10 +110,10 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo := new(api.StoreInfo)
+	storeInfo := new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
-	pdctl.CheckStoresInfo(re, []*api.StoreInfo{storeInfo}, stores[:1])
+	pdctl.CheckStoresInfo(re, []*response.StoreInfo{storeInfo}, stores[:1])
 	re.Nil(storeInfo.Store.Labels)
 
 	// store <store_id> label command
@@ -162,7 +162,7 @@ func TestStore(t *testing.T) {
 				args = testcase.newArgs
 			}
 			cmd := ctl.GetRootCmd()
-			storeInfo := new(api.StoreInfo)
+			storeInfo := new(response.StoreInfo)
 			_, err = pdctl.ExecuteCommand(cmd, args...)
 			re.NoError(err)
 			args = []string{"-u", pdAddr, "store", "1"}
@@ -305,7 +305,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
@@ -338,7 +338,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
@@ -354,7 +354,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
@@ -370,7 +370,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
@@ -381,7 +381,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	re.Equal(1, storesInfo.Count)
@@ -391,7 +391,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	re.Equal(0, storesInfo.Count)
@@ -470,9 +470,9 @@ func TestTombstoneStore(t *testing.T) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*api.StoreInfo{
+	stores := []*response.StoreInfo{
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            2,
 					State:         metapb.StoreState_Tombstone,
@@ -483,7 +483,7 @@ func TestTombstoneStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            3,
 					State:         metapb.StoreState_Tombstone,
@@ -494,7 +494,7 @@ func TestTombstoneStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            4,
 					State:         metapb.StoreState_Tombstone,
