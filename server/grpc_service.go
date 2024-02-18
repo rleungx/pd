@@ -332,6 +332,12 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 			if err != nil || resp == nil {
 				log.Warn("failed to get min ts from tso server",
 					zap.String("address", addr), zap.Error(err))
+				if grpcutil.NeedRebuildConnection(err) {
+					cc, loaded := s.clientConns.LoadAndDelete(addr)
+					if loaded {
+						cc.(*grpc.ClientConn).Close()
+					}
+				}
 				return
 			}
 			mutex.Lock()
