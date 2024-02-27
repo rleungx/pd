@@ -419,6 +419,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 					zap.Uint32("keyspace-id-in-request", keyspaceID),
 					zap.String("tso-server-addr", tsoServerAddr),
 					errs.ZapError(err))
+				if grpcutil.NeedRebuildConnection(err) {
+					cc, loaded := c.clientConns.LoadAndDelete(tsoServerAddr)
+					if loaded {
+						cc.(*grpc.ClientConn).Close()
+					}
+				}
 			}
 			return err
 		}
