@@ -336,7 +336,7 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately check if there is any membership change among the primary/secondaries in
+// CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	c.apiSvcDiscovery.CheckMemberChanged()
@@ -419,6 +419,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 					zap.Uint32("keyspace-id-in-request", keyspaceID),
 					zap.String("tso-server-addr", tsoServerAddr),
 					errs.ZapError(err))
+				if grpcutil.NeedRebuildConnection(err) {
+					cc, loaded := c.clientConns.LoadAndDelete(tsoServerAddr)
+					if loaded {
+						cc.(*grpc.ClientConn).Close()
+					}
+				}
 			}
 			return err
 		}
