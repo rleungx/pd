@@ -178,7 +178,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		}
 	}
 
-	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	storeInfos := statistics.NewStoreSummaryInfo(tc.GetStores())
 	hb.summaryPendingInfluence(storeInfos) // Calling this function will GC.
 
 	for i := range opInfluenceCreators {
@@ -783,16 +783,16 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		re.NotEmpty(ops)
 		re.True(
 			loadsEqual(
-				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
+				hb.storeLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
 				[]float64{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}))
 		re.NotEqual(tikvQuerySum, hotRegionQuerySum)
 		re.True(
 			loadsEqual(
-				hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads,
+				hb.storeLoadInfos[writePeer][1].LoadPred.Expect.Loads,
 				[]float64{tikvBytesSum / aliveTiKVCount, tikvKeysSum / aliveTiKVCount, 0}))
 		re.True(
 			loadsEqual(
-				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				hb.storeLoadInfos[writePeer][8].LoadPred.Expect.Loads,
 				[]float64{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}))
 		// check IsTraceRegionFlow == false
 		pdServerCfg := tc.GetPDServerConfig()
@@ -803,7 +803,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		re.NotEmpty(ops)
 		re.True(
 			loadsEqual(
-				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
+				hb.storeLoadInfos[writePeer][8].LoadPred.Expect.Loads,
 				[]float64{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}))
 		// revert
 		pdServerCfg.FlowRoundByDigit = 3
@@ -1920,7 +1920,7 @@ func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheC
 		// try schedule
 		hb.prepareForBalance(testCase.kind, tc)
 		leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
-		leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
+		leaderSolver.cur = &solution{srcStore: hb.storeLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
 		re.Empty(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)) // skip schedule
 		threshold := tc.GetHotRegionCacheHitsThreshold()
 		leaderSolver.minHotDegree = 0
@@ -2076,7 +2076,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	op := ops[0]
 	re.NotNil(op)
 
-	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	storeInfos := statistics.NewStoreSummaryInfo(tc.GetStores())
 	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -0.5*units.MiB))
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -0.5*units.MiB))
@@ -2101,7 +2101,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	op = ops[0]
 	re.NotNil(op)
 
-	storeInfos = statistics.SummaryStoreInfos(tc.GetStores())
+	storeInfos = statistics.NewStoreSummaryInfo(tc.GetStores())
 	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
 	// assert read/write influence is the sum of write peer and write leader
 	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -1.2*units.MiB))

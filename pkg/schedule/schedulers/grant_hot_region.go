@@ -264,10 +264,10 @@ func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
-	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
-	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
+	storeLoadInfos := s.storeLoadInfos[buildResourceType(typ, constant.RegionKind)]
+	infos := make([]*statistics.StoreLoadDetail, len(storeLoadInfos))
 	index := 0
-	for _, info := range stLoadInfos {
+	for _, info := range storeLoadInfos {
 		infos[index] = info
 		index++
 	}

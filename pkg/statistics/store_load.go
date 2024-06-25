@@ -104,8 +104,8 @@ type Influence struct {
 	Count float64
 }
 
-// SummaryStoreInfos return a mapping from store to summary information.
-func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
+// NewStoreSummaryInfo return a mapping from store to summary information.
+func NewStoreSummaryInfo(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{

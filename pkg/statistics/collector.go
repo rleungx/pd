@@ -92,13 +92,7 @@ func (tiflashCollector) Engine() string {
 }
 
 func (tiflashCollector) Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	switch kind {
-	case constant.LeaderKind:
-		return false
-	case constant.RegionKind:
-		return info.IsTiFlash()
-	}
-	return false
+	return info.IsTiFlash() && kind == constant.RegionKind
 }
 
 func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64) {

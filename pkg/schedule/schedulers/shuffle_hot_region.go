@@ -161,7 +161,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bo
 	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, constant.LeaderKind)])
+	operators := s.randomSchedule(cluster, s.storeLoadInfos[buildResourceType(rw, constant.LeaderKind)])
 	return operators, nil
 }
 
