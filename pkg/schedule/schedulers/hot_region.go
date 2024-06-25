@@ -208,19 +208,15 @@ func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 			}
 		}
 	}
+	// for metrics
 	for storeID, info := range storeInfos {
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
-				setHotPendingInfluenceMetrics(storeLabel, rwTy.String(), utils.DimToString(dim), infl.Loads[kind])
+				HotPendingSum.WithLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim)).Set(infl.Loads[kind])
 			})
 		}
 	}
-}
-
-// setHotPendingInfluenceMetrics sets pending influence in hot scheduler.
-func setHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
-	HotPendingSum.WithLabelValues(storeLabel, rwTy, dim).Set(load)
 }
 
 func (h *baseHotScheduler) randomRWType() utils.RWType {
