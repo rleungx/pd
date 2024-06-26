@@ -254,9 +254,9 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 	return sc.hotStat.StoresStats
 }
 
-// GetStoresLoads returns load stats of all stores.
-func (sc *schedulingController) GetStoresLoads() map[uint64][]float64 {
-	return sc.hotStat.GetStoresLoads()
+// GetStoresLoadStats returns load stats of all stores.
+func (sc *schedulingController) GetStoresLoadStats() map[uint64][]float64 {
+	return sc.hotStat.GetStoresLoadStats()
 }
 
 // IsRegionHot checks if a region is in hot state.

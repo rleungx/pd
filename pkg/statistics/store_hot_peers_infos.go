@@ -72,29 +72,29 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 // GetHotStatus returns the hot status for a given type.
 // NOTE: This function is exported by HTTP API. It does not contain `isLearner` and `LastUpdateTime` field. If need, please call `updateRegionInfo`.
 func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ utils.RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
-	stInfos := NewStoreSummaryInfo(stores)
-	stLoadInfosAsLeader := SummaryStoresLoad(
-		stInfos,
+	storesLoadDetails := NewStoresLoadDetails(stores)
+	storeLoadDetailsAsLeader := SummaryStoreLoadDetails(
+		storesLoadDetails,
 		storesLoads,
 		nil,
 		regionStats,
 		isTraceRegionFlow,
 		typ, constant.LeaderKind)
-	stLoadInfosAsPeer := SummaryStoresLoad(
-		stInfos,
+	storeLoadDetailsAsPeer := SummaryStoreLoadDetails(
+		storesLoadDetails,
 		storesLoads,
 		nil,
 		regionStats,
 		isTraceRegionFlow,
 		typ, constant.RegionKind)
 
-	asLeader := make(StoreHotPeersStat, len(stLoadInfosAsLeader))
-	asPeer := make(StoreHotPeersStat, len(stLoadInfosAsPeer))
+	asLeader := make(StoreHotPeersStat, len(storeLoadDetailsAsLeader))
+	asPeer := make(StoreHotPeersStat, len(storeLoadDetailsAsPeer))
 
-	for id, detail := range stLoadInfosAsLeader {
+	for id, detail := range storeLoadDetailsAsLeader {
 		asLeader[id] = detail.ToHotPeersStat()
 	}
-	for id, detail := range stLoadInfosAsPeer {
+	for id, detail := range storeLoadDetailsAsPeer {
 		asPeer[id] = detail.ToHotPeersStat()
 	}
 	return &StoreHotPeersInfos{
@@ -103,10 +103,10 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 	}
 }
 
-// SummaryStoresLoad Load information of all available stores.
+// SummaryStoreLoadDetails Load information of all available stores.
 // it will filter the hot peer and calculate the current and future stat(rate,count) for each store
-func SummaryStoresLoad(
-	storeInfos map[uint64]*StoreSummaryInfo,
+func SummaryStoreLoadDetails(
+	storesLoadDetail map[uint64]*StoreLoadDetail,
 	storesLoads map[uint64][]float64,
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
@@ -118,7 +118,7 @@ func SummaryStoresLoad(
 	loadDetail := make(map[uint64]*StoreLoadDetail, len(storesLoads))
 
 	tikvLoadDetail := summaryStoresLoadByEngine(
-		storeInfos,
+		storesLoadDetail,
 		storesLoads,
 		storesHistoryLoads,
 		storeHotPeers,
@@ -126,7 +126,7 @@ func SummaryStoresLoad(
 		newTikvCollector(),
 	)
 	tiflashLoadDetail := summaryStoresLoadByEngine(
-		storeInfos,
+		storesLoadDetail,
 		storesLoads,
 		storesHistoryLoads,
 		storeHotPeers,
@@ -134,32 +134,35 @@ func SummaryStoresLoad(
 		newTiFlashCollector(isTraceRegionFlow),
 	)
 
-	for _, detail := range append(tikvLoadDetail, tiflashLoadDetail...) {
+	for _, detail := range tikvLoadDetail {
+		loadDetail[detail.GetID()] = detail
+	}
+
+	for _, detail := range tiflashLoadDetail {
 		loadDetail[detail.GetID()] = detail
 	}
 	return loadDetail
 }
 
 func summaryStoresLoadByEngine(
-	storeInfos map[uint64]*StoreSummaryInfo,
+	storesLoadDetails map[uint64]*StoreLoadDetail,
 	storesLoads map[uint64][]float64,
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	rwTy utils.RWType,
 	kind constant.ResourceKind,
 	collector storeCollector,
-) []*StoreLoadDetail {
-	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
+) map[uint64]*StoreLoadDetail {
 	allStoreLoadSum := make([]float64, utils.DimLen)
 	allStoreHistoryLoadSum := make([][]float64, utils.DimLen)
 	allStoreCount := 0
 	allHotPeersCount := 0
 
-	for _, info := range storeInfos {
-		store := info.StoreInfo
+	for _, storeLoad := range storesLoadDetails {
+		store := storeLoad.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
-		if !ok || !collector.Filter(info, kind) {
+		if !ok || !collector.Filter(storeLoad, kind) {
 			continue
 		}
 
@@ -207,22 +210,19 @@ func summaryStoresLoadByEngine(
 		allHotPeersCount += len(hotPeers)
 
 		// Build store load prediction from current load and pending influence.
-		stLoadPred := (&StoreLoad{
+		storeLoadPred := (&StoreLoad{
 			Loads:        loads,
 			Count:        float64(len(hotPeers)),
 			HistoryLoads: historyLoads,
-		}).ToLoadPred(rwTy, info.PendingSum)
+		}).ToLoadPred(rwTy, storeLoad.PendingSum)
 
 		// Construct store load info.
-		loadDetail = append(loadDetail, &StoreLoadDetail{
-			StoreSummaryInfo: info,
-			LoadPred:         stLoadPred,
-			HotPeers:         hotPeers,
-		})
+		storeLoad.LoadPred = storeLoadPred
+		storeLoad.HotPeers = hotPeers
 	}
 
 	if allStoreCount == 0 {
-		return loadDetail
+		return storesLoadDetails
 	}
 
 	expectCount := float64(allHotPeersCount) / float64(allStoreCount)
@@ -241,7 +241,7 @@ func summaryStoresLoadByEngine(
 	}
 	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
-		for _, detail := range loadDetail {
+		for _, detail := range storesLoadDetails {
 			for i := range expectLoads {
 				stddevLoads[i] += math.Pow(detail.LoadPred.Current.Loads[i]-expectLoads[i], 2)
 			}
@@ -278,11 +278,11 @@ func summaryStoresLoadByEngine(
 		Loads: stddevLoads,
 		Count: expectCount,
 	}
-	for _, detail := range loadDetail {
+	for _, detail := range storesLoadDetail {
 		detail.LoadPred.Expect = expect
 		detail.LoadPred.Stddev = stddev
 	}
-	return loadDetail
+	return storesLoadDetail
 }
 
 func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {

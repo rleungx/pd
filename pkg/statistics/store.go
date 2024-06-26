@@ -102,8 +102,8 @@ func (s *StoresStats) SetRegionsStats(storeIDs []uint64, writeBytesRates, writeK
 	}
 }
 
-// GetStoresLoads returns all stores loads.
-func (s *StoresStats) GetStoresLoads() map[uint64][]float64 {
+// GetStoresLoadStats returns all stores loads.
+func (s *StoresStats) GetStoresLoadStats() map[uint64][]float64 {
 	s.RLock()
 	defer s.RUnlock()
 	res := make(map[uint64][]float64, len(s.rollingStoresStats))

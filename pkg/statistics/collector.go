@@ -25,7 +25,7 @@ type storeCollector interface {
 	// Engine returns the type of Store.
 	Engine() string
 	// Filter determines whether the Store needs to be handled by itself.
-	Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool
+	Filter(store *StoreLoadDetail, kind constant.ResourceKind) bool
 	// GetLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
 	GetLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64)
 }
@@ -40,13 +40,13 @@ func (tikvCollector) Engine() string {
 	return core.EngineTiKV
 }
 
-func (tikvCollector) Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	if info.IsTiFlash() {
+func (tikvCollector) Filter(store *StoreLoadDetail, kind constant.ResourceKind) bool {
+	if store.IsTiFlash() {
 		return false
 	}
 	switch kind {
 	case constant.LeaderKind:
-		return info.AllowLeaderTransfer()
+		return store.AllowLeaderTransfer()
 	case constant.RegionKind:
 		return true
 	}
@@ -91,8 +91,8 @@ func (tiflashCollector) Engine() string {
 	return core.EngineTiFlash
 }
 
-func (tiflashCollector) Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	return info.IsTiFlash() && kind == constant.RegionKind
+func (tiflashCollector) Filter(store *StoreLoadDetail, kind constant.ResourceKind) bool {
+	return store.IsTiFlash() && kind == constant.RegionKind
 }
 
 func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64) {

@@ -69,11 +69,6 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	}
 }
 
-// IsUniform returns true if the stores are uniform.
-func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
-	return li.LoadPred.Stddev.Loads[dim] < threshold
-}
-
 func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 	byteRate := p.GetLoad(utils.ByteDim)
 	keyRate := p.GetLoad(utils.KeyDim)
@@ -104,22 +99,24 @@ type Influence struct {
 	Count float64
 }
 
-// NewStoreSummaryInfo return a mapping from store to summary information.
-func NewStoreSummaryInfo(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
-	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
+// NewStoresLoadDetails return a mapping from store to summary information.
+func NewStoresLoadDetails(stores []*core.StoreInfo) map[uint64]*StoreLoadDetail {
+	storesLoadDetails := make(map[uint64]*StoreLoadDetail, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
 			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
-		infos[store.GetID()] = info
+		storesLoadDetails[store.GetID()] = &StoreLoadDetail{
+			StoreSummaryInfo: info,
+		}
 	}
-	return infos
+	return storesLoadDetails
 }
 
 // AddInfluence adds influence to pending sum.
-func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
+func (s *StoreLoadDetail) AddInfluence(infl *Influence, w float64) {
 	if infl == nil || w == 0 {
 		return
 	}
@@ -136,13 +133,18 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 }
 
 // IsTiFlash returns true if the store is TiFlash.
-func (s *StoreSummaryInfo) IsTiFlash() bool {
+func (s *StoreLoadDetail) IsTiFlash() bool {
 	return s.isTiFlash
 }
 
 // SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
-func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
+func (s *StoreLoadDetail) SetEngineAsTiFlash() {
 	s.isTiFlash = true
+}
+
+// IsUniform returns true if the stores are uniform.
+func (s *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
+	return s.LoadPred.Stddev.Loads[dim] < threshold
 }
 
 // StoreLoad records the current load.

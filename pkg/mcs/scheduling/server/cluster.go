@@ -168,9 +168,9 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 	return c.coordinator.GetRegionScatterer()
 }
 
-// GetStoresLoads returns load stats of all stores.
-func (c *Cluster) GetStoresLoads() map[uint64][]float64 {
-	return c.hotStat.GetStoresLoads()
+// GetStoresLoadStats returns load stats of all stores.
+func (c *Cluster) GetStoresLoadStats() map[uint64][]float64 {
+	return c.hotStat.GetStoresLoadStats()
 }
 
 // IsRegionHot checks if a region is in hot state.

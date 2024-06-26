@@ -110,11 +110,11 @@ var (
 
 type baseHotScheduler struct {
 	*BaseScheduler
-	// storeLoadInfos contain store statistics information by resource type.
-	// storeLoadInfos is temporary states but exported to API or metrics.
+	// storesLoadDetails contain store statistics information by resource type.
+	// storesLoadDetails is temporary states but exported to API or metrics.
 	// Every time `Schedule()` will recalculate it.
-	storeLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
-	// storeHistoryLoads stores the history `storeLoadInfos`
+	storesLoadDetails [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	// storeHistoryLoads stores the history `storesLoadDetails`
 	// Every time `Schedule()` will rolling update it.
 	storeHistoryLoads *statistics.StoreHistoryLoads
 	// regionPendings stores regionID -> pendingInfluence,
@@ -137,7 +137,7 @@ func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.
 		r:                 rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.storeLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
+		ret.storesLoadDetails[ty] = map[uint64]*statistics.StoreLoadDetail{}
 	}
 	return ret
 }
@@ -145,16 +145,16 @@ func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
 func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.SchedulerCluster) {
-	storeInfos := statistics.NewStoreSummaryInfo(cluster.GetStores())
-	h.summaryPendingInfluence(storeInfos)
-	storesLoads := cluster.GetStoresLoads()
+	storesLoadDetails := statistics.NewStoresLoadDetails(cluster.GetStores())
+	h.summaryPendingInfluence(storesLoadDetails)
+	storesLoadStats := cluster.GetStoresLoadStats()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
-		h.storeLoadInfos[ty] = statistics.SummaryStoresLoad(
-			storeInfos,
-			storesLoads,
+		h.storesLoadDetails[ty] = statistics.SummaryStoreLoadDetails(
+			storesLoadDetails,
+			storesLoadStats,
 			h.storeHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,
@@ -187,11 +187,11 @@ func (h *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterva
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+func (h *baseHotScheduler) summaryPendingInfluence(storesLoadDetails map[uint64]*statistics.StoreLoadDetail) {
 	for id, p := range h.regionPendings {
 		for _, from := range p.froms {
-			from := storeInfos[from]
-			to := storeInfos[p.to]
+			from := storesLoadDetails[from]
+			to := storesLoadDetails[p.to]
 			maxZombieDur := p.maxZombieDuration
 			weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
 
@@ -209,7 +209,7 @@ func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 		}
 	}
 	// for metrics
-	for storeID, info := range storeInfos {
+	for storeID, info := range storesLoadDetails {
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
@@ -494,7 +494,7 @@ func isAvailableV1(s *solution) bool {
 type balanceSolver struct {
 	sche.SchedulerCluster
 	sche             *hotScheduler
-	storeLoadDetail  map[uint64]*statistics.StoreLoadDetail
+	storesLoadDetail map[uint64]*statistics.StoreLoadDetail
 	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
 	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
 	rwTy             utils.RWType
@@ -550,7 +550,7 @@ func (bs *balanceSolver) init() {
 	}
 
 	// Init store load detail according to the type.
-	bs.storeLoadDetail = bs.sche.storeLoadInfos[bs.resourceTy]
+	bs.storesLoadDetail = bs.sche.storesLoadDetails[bs.resourceTy]
 
 	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, utils.DimLen)}
 	bs.minDst = &statistics.StoreLoad{
@@ -564,7 +564,7 @@ func (bs *balanceSolver) init() {
 
 	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
 	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
-	for _, detail := range bs.storeLoadDetail {
+	for _, detail := range bs.storesLoadDetail {
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
 		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
 		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
@@ -643,7 +643,7 @@ func newBalanceSolver(sche *hotScheduler, cluster sche.SchedulerCluster, rwTy ut
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.SchedulerCluster == nil || bs.sche == nil || bs.storeLoadDetail == nil {
+	if bs.SchedulerCluster == nil || bs.sche == nil || bs.storesLoadDetail == nil {
 		return false
 	}
 	return true
@@ -867,7 +867,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	ret := make(map[uint64]*statistics.StoreLoadDetail)
 	confSrcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
-	for id, detail := range bs.storeLoadDetail {
+	for id, detail := range bs.storesLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
 		if detail.IsTiFlash() {
 			if !confEnableForTiFlash {
@@ -1051,7 +1051,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
 		}
-		for _, detail := range bs.storeLoadDetail {
+		for _, detail := range bs.storesLoadDetail {
 			candidates = append(candidates, detail)
 		}
 
@@ -1069,7 +1069,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
-			for storeID, detail := range bs.storeLoadDetail {
+			for storeID, detail := range bs.storesLoadDetail {
 				if storeID == bs.cur.mainPeerStat.StoreID {
 					continue
 				}
@@ -1090,7 +1090,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				filters = append(filters, leaderFilter)
 			}
 			for _, peer := range bs.cur.region.GetFollowers() {
-				if detail, ok := bs.storeLoadDetail[peer.GetStoreId()]; ok {
+				if detail, ok := bs.storesLoadDetail[peer.GetStoreId()]; ok {
 					candidates = append(candidates, detail)
 				}
 			}

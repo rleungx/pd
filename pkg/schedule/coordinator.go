@@ -602,7 +602,7 @@ func (c *Coordinator) Stop() {
 // GetHotRegionsByType gets hot regions' statistics by RWType.
 func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoads()
+	storeLoads := c.cluster.GetStoresLoadStats()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
 	switch typ {

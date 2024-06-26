@@ -1006,7 +1006,7 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 	if error != nil {
 		return nil, error
 	}
-	storesLoads, error := h.GetStoresLoads()
+	storesLoads, error := h.GetStoresLoadStats()
 	if error != nil {
 		return nil, error
 	}
@@ -1029,13 +1029,13 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 	return stats, nil
 }
 
-// GetStoresLoads gets all hot write stores stats.
-func (h *Handler) GetStoresLoads() (map[uint64][]float64, error) {
+// GetStoresLoadStats gets all hot write stores stats.
+func (h *Handler) GetStoresLoadStats() (map[uint64][]float64, error) {
 	c := h.GetCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	return c.GetStoresLoads(), nil
+	return c.GetStoresLoadStats(), nil
 }
 
 // HotBucketsResponse is the response for hot buckets.

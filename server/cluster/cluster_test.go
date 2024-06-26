@@ -2561,7 +2561,7 @@ func TestCollectMetrics(t *testing.T) {
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
-	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, utils.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
+	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoadStats(), regionStats, utils.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
 		s.Stats = nil
 	}

@@ -132,10 +132,10 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	mc.PutRegion(r)
 }
 
-// GetStoresLoads gets stores load statistics.
-func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+// GetStoresLoadStats gets stores load statistics.
+func (mc *Cluster) GetStoresLoadStats() map[uint64][]float64 {
 	mc.HotStat.FilterUnhealthyStore(mc)
-	return mc.HotStat.GetStoresLoads()
+	return mc.HotStat.GetStoresLoadStats()
 }
 
 // IsRegionHot checks if the region is hot.

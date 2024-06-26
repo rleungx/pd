@@ -99,12 +99,14 @@ func TestSummaryStoreInfos(t *testing.T) {
 	kind := constant.LeaderKind
 	collector := newTikvCollector()
 	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, DefaultHistorySampleInterval)
-	storeInfos := make(map[uint64]*StoreSummaryInfo)
+	storesLoadDetails := make(map[uint64]*StoreLoadDetail)
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {
-		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
-			isTiFlash: false,
-			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
+		storesLoadDetails[uint64(storeID)] = &StoreLoadDetail{
+			StoreSummaryInfo: &StoreSummaryInfo{
+				isTiFlash: false,
+				StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
+			},
 		}
 		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
 		for i, v := range storeLoads[uint64(storeID)] {
@@ -113,7 +115,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	}
 
 	// case 1: put one element into history load
-	details := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+	details := summaryStoresLoadByEngine(storesLoadDetails, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
 	re.Len(details, 2)
 	re.Empty(details[0].LoadPred.Current.HistoryLoads)
 	re.Empty(details[1].LoadPred.Current.HistoryLoads)
@@ -132,7 +134,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	// case 2: put many elements into history load
 	storeHistoryLoad.sampleDuration = 0
 	for i := 1; i < 10; i++ {
-		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+		details = summaryStoresLoadByEngine(storesLoadDetails, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
 		expect := []float64{2, 4, 10}
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
