@@ -159,8 +159,7 @@ func summaryStoresLoadByEngine(
 	allHotPeersCount := 0
 
 	for _, storeLoad := range storesLoadDetails {
-		store := storeLoad.StoreInfo
-		id := store.GetID()
+		id := storeLoad.GetID()
 		storeLoads, ok := storesLoads[id]
 		if !ok || !collector.Filter(storeLoad, kind) {
 			continue
@@ -278,11 +277,11 @@ func summaryStoresLoadByEngine(
 		Loads: stddevLoads,
 		Count: expectCount,
 	}
-	for _, detail := range storesLoadDetail {
+	for _, detail := range storesLoadDetails {
 		detail.LoadPred.Expect = expect
 		detail.LoadPred.Stddev = stddev
 	}
-	return storesLoadDetail
+	return storesLoadDetails
 }
 
 func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {

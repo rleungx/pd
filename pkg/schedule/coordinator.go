@@ -602,16 +602,16 @@ func (c *Coordinator) Stop() {
 // GetHotRegionsByType gets hot regions' statistics by RWType.
 func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoadStats()
+	storesLoads := c.cluster.GetStoresLoadStats()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
 	switch typ {
 	case utils.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Write, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storesLoads, regionStats, utils.Write, isTraceFlow)
 	case utils.Read:
 		regionStats := c.cluster.RegionReadStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storesLoads, regionStats, utils.Read, isTraceFlow)
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
