@@ -31,10 +31,10 @@ type StoreLoadDetail struct {
 }
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
-func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[utils.ByteDim],
-		li.LoadPred.Current.Loads[utils.KeyDim], li.LoadPred.Current.Loads[utils.QueryDim]
-	if len(li.HotPeers) == 0 {
+func (s *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
+	storeByteRate, storeKeyRate, storeQueryRate := s.LoadPred.Current.Loads[utils.ByteDim],
+		s.LoadPred.Current.Loads[utils.KeyDim], s.LoadPred.Current.Loads[utils.QueryDim]
+	if len(s.HotPeers) == 0 {
 		return &HotPeersStat{
 			StoreByteRate:  storeByteRate,
 			StoreKeyRate:   storeKeyRate,
@@ -47,8 +47,8 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 		}
 	}
 	var byteRate, keyRate, queryRate float64
-	peers := make([]HotPeerStatShow, 0, len(li.HotPeers))
-	for _, peer := range li.HotPeers {
+	peers := make([]HotPeerStatShow, 0, len(s.HotPeers))
+	for _, peer := range s.HotPeers {
 		if peer.HotDegree > 0 {
 			peers = append(peers, toHotPeerStatShow(peer))
 			byteRate += peer.GetLoad(utils.ByteDim)

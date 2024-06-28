@@ -387,8 +387,8 @@ func TestSplitBucketsByLoad(t *testing.T) {
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
-	// checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
-	// checkHotWriteRegionPlacement(re, true)
+	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
+	checkHotWriteRegionPlacement(re, true)
 }
 
 func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {

@@ -1006,13 +1006,13 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 	if error != nil {
 		return nil, error
 	}
-	storesLoads, error := h.GetStoresLoadStats()
+	storesLoadStats, error := h.GetStoresLoadStats()
 	if error != nil {
 		return nil, error
 	}
 	for _, store := range stores {
 		id := store.GetID()
-		if loads, ok := storesLoads[id]; ok {
+		if loads, ok := storesLoadStats[id]; ok {
 			if store.IsTiFlash() {
 				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
 				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
