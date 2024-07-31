@@ -28,7 +28,6 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -103,15 +102,6 @@ func (s *Server) SetLogLevel(level string) error {
 
 // Run runs the Resource Manager server.
 func (s *Server) Run() (err error) {
-	skipWaitAPIServiceReady := false
-	failpoint.Inject("skipWaitAPIServiceReady", func() {
-		skipWaitAPIServiceReady = true
-	})
-	if !skipWaitAPIServiceReady {
-		if err := utils.WaitAPIServiceReady(s); err != nil {
-			return err
-		}
-	}
 	if err := utils.InitClient(s); err != nil {
 		return err
 	}

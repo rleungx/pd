@@ -70,5 +70,6 @@ func (*mockPDServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, er
 }
 func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged()              {}
 func (*mockPDServiceDiscovery) CheckMemberChanged() error                { return nil }
+func (*mockPDServiceDiscovery) CheckServiceModeChanged() error           { return nil }
 func (*mockPDServiceDiscovery) AddServingURLSwitchedCallback(...func())  {}
 func (*mockPDServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}

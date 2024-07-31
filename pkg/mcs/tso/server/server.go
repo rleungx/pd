@@ -30,7 +30,6 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -144,15 +143,6 @@ func (s *Server) SetLogLevel(level string) error {
 
 // Run runs the TSO server.
 func (s *Server) Run() error {
-	skipWaitAPIServiceReady := false
-	failpoint.Inject("skipWaitAPIServiceReady", func() {
-		skipWaitAPIServiceReady = true
-	})
-	if !skipWaitAPIServiceReady {
-		if err := utils.WaitAPIServiceReady(s); err != nil {
-			return err
-		}
-	}
 	go systimemon.StartMonitor(s.Context(), time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
@@ -161,7 +151,43 @@ func (s *Server) Run() error {
 	if err := utils.InitClient(s); err != nil {
 		return err
 	}
+
+	// register
+	if err := s.Register(); err != nil {
+		return err
+	}
 	return s.startServer()
+}
+
+func (s *Server) Register() error {
+	var err error
+	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
+		return err
+	}
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	s.serviceID = &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.cfg.AdvertiseListenAddr,
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+	}
+	serializedEntry, err := s.serviceID.Serialize()
+	if err != nil {
+		return err
+	}
+	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
+		utils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	if err := s.serviceRegister.Register(); err != nil {
+		log.Error("failed to register the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
+		return err
+	}
+	return nil
 }
 
 // Close closes the server.
@@ -355,11 +381,6 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
-		return err
-	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
-
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metaDataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	// The independent TSO service still reuses PD version info since PD and TSO are just
@@ -371,18 +392,7 @@ func (s *Server) startServer() (err error) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
-	execPath, err := os.Executable()
-	deployPath := filepath.Dir(execPath)
-	if err != nil {
-		deployPath = ""
-	}
-	s.serviceID = &discovery.ServiceRegistryEntry{
-		ServiceAddr:    s.cfg.AdvertiseListenAddr,
-		Version:        versioninfo.PDReleaseVersion,
-		GitHash:        versioninfo.PDGitHash,
-		DeployPath:     deployPath,
-		StartTimestamp: s.StartTimestamp(),
-	}
+
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
 		s.clusterID, legacySvcRootPath, tsoSvcRootPath, s.cfg)
@@ -407,18 +417,6 @@ func (s *Server) startServer() (err error) {
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.GetStartCallbacks() {
 		cb()
-	}
-
-	// Server has started.
-	serializedEntry, err := s.serviceID.Serialize()
-	if err != nil {
-		return err
-	}
-	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
-		utils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
-	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
-		return err
 	}
 
 	atomic.StoreInt64(&s.isRunning, 1)

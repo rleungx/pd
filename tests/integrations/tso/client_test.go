@@ -480,11 +480,9 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateServiceMode"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())

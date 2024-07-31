@@ -152,9 +152,7 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	checkTSOPath(re, false /*isAPIServiceMode*/)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 }
 
 func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {

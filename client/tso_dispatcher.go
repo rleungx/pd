@@ -302,6 +302,18 @@ tsoBatchLoop:
 			connectionCtxs.Delete(streamURL)
 			cancel()
 			stream = nil
+			if errs.IsServiceModeChange(err) {
+				if err := bo.Exec(ctx, svcDiscovery.CheckServiceModeChanged); err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+				}
+				provider.updateConnectionCtxs(ctx, dc, connectionCtxs)
+				continue
+			}
+
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if errs.IsLeaderChange(err) {
 				if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {

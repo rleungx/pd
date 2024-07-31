@@ -141,20 +141,47 @@ func (s *Server) SetLogLevel(level string) error {
 
 // Run runs the scheduling server.
 func (s *Server) Run() error {
-	skipWaitAPIServiceReady := false
-	failpoint.Inject("skipWaitAPIServiceReady", func() {
-		skipWaitAPIServiceReady = true
-	})
-	if !skipWaitAPIServiceReady {
-		if err := utils.WaitAPIServiceReady(s); err != nil {
-			return err
-		}
-	}
-
 	if err := utils.InitClient(s); err != nil {
 		return err
 	}
+
+	// register
+	if err := s.Register(); err != nil {
+		return err
+	}
+
 	return s.startServer()
+}
+
+func (s *Server) Register() error {
+	var err error
+	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
+		return err
+	}
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	s.serviceID = &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.cfg.AdvertiseListenAddr,
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+	}
+	serializedEntry, err := s.serviceID.Serialize()
+	if err != nil {
+		return err
+	}
+	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
+		utils.SchedulingServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	if err := s.serviceRegister.Register(); err != nil {
+		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
+		return err
+	}
+	return nil
 }
 
 func (s *Server) startServerLoop() {
@@ -416,18 +443,6 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
-	execPath, err := os.Executable()
-	deployPath := filepath.Dir(execPath)
-	if err != nil {
-		deployPath = ""
-	}
-	s.serviceID = &discovery.ServiceRegistryEntry{
-		ServiceAddr:    s.cfg.AdvertiseListenAddr,
-		Version:        versioninfo.PDReleaseVersion,
-		GitHash:        versioninfo.PDGitHash,
-		DeployPath:     deployPath,
-		StartTimestamp: s.StartTimestamp(),
-	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
@@ -460,17 +475,6 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	// Server has started.
-	serializedEntry, err := s.serviceID.Serialize()
-	if err != nil {
-		return err
-	}
-	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
-		utils.SchedulingServiceName, s.cfg.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
-	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
-		return err
-	}
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }

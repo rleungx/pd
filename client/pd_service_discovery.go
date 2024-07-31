@@ -115,6 +115,7 @@ type ServiceDiscovery interface {
 	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
+	CheckServiceModeChanged() error
 	AddServingURLSwitchedCallback(callbacks ...func())
 	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
@@ -505,7 +506,7 @@ func (c *pdServiceDiscovery) Init() error {
 		}
 	}
 
-	if err := c.checkServiceModeChanged(); err != nil {
+	if err := c.updateServiceMode(); err != nil {
 		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
 	}
 
@@ -582,7 +583,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 			return
 		case <-ticker.C:
 		}
-		if err := c.checkServiceModeChanged(); err != nil {
+		if err := c.updateServiceMode(); err != nil {
 			log.Error("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
@@ -782,6 +783,10 @@ func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
+func (c *pdServiceDiscovery) CheckServiceModeChanged() error {
+	return c.updateServiceMode()
+}
+
 // AddServingURLSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
 func (c *pdServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
@@ -856,7 +861,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	return nil
 }
 
-func (c *pdServiceDiscovery) checkServiceModeChanged() error {
+func (c *pdServiceDiscovery) updateServiceMode() error {
 	leaderURL := c.getLeaderURL()
 	if len(leaderURL) == 0 {
 		return errors.New("no leader found")

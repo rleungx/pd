@@ -57,6 +57,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -174,6 +175,7 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
+	allocator                *tso.AllocatorManager
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -195,7 +197,7 @@ type Status struct {
 
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client) *RaftCluster {
+	httpClient *http.Client, allocator *tso.AllocatorManager) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
 		clusterID:       clusterID,
@@ -204,6 +206,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		etcdClient:      etcdClient,
 		BasicCluster:    basicCluster,
 		storage:         storage,
+		allocator:       allocator,
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -314,6 +317,8 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
+
+	c.checkTSOService()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -351,6 +356,7 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
+
 	c.checkServices()
 	c.wg.Add(9)
 	go c.runServiceCheckJob()
@@ -370,6 +376,43 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
+// checkTSOService is used to start monitor TSO service.
+func (c *RaftCluster) checkTSOService() {
+	allocator, err := c.allocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get global TSO allocator", errs.ZapError(err))
+		return
+	}
+	if c.isAPIServiceMode {
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.TSOServiceName)
+		if err == nil && len(servers) != 0 {
+			if !c.IsServiceIndependent(mcsutils.TSOServiceName) {
+				// leader tso service exit, tso independent service provide tso
+				c.allocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
+			}
+			c.SetServiceIndependent(mcsutils.TSOServiceName, true)
+		} else {
+			if !allocator.IsInitialize() {
+				log.Info("initializing the global TSO allocator")
+				if err := allocator.Initialize(0); err != nil {
+					log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+					return
+				}
+			}
+			c.SetServiceIndependent(mcsutils.TSOServiceName, false)
+		}
+	} else {
+		if !allocator.IsInitialize() {
+			log.Info("initializing the global TSO allocator")
+			if err := allocator.Initialize(0); err != nil {
+				log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+				return
+			}
+		}
+		c.SetServiceIndependent(mcsutils.TSOServiceName, false)
+	}
+}
+
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
@@ -381,7 +424,7 @@ func (c *RaftCluster) checkServices() {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
 			}
 			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+				c.SetServiceIndependent(mcsutils.SchedulingServiceName, true)
 			}
 		}
 	} else {
@@ -395,11 +438,13 @@ func (c *RaftCluster) runServiceCheckJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(serviceCheckInterval)
+	ticker1 := time.NewTicker(100 * time.Millisecond)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
 		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
+	defer ticker1.Stop()
 
 	for {
 		select {
@@ -408,6 +453,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 			return
 		case <-ticker.C:
 			c.checkServices()
+		case <-ticker1.C:
+			c.checkTSOService()
 		}
 	}
 }
@@ -2436,9 +2483,22 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
+	if c == nil {
+		return false
+	}
 	independent, exist := c.independentServices.Load(name)
 	if !exist {
 		return false
 	}
 	return independent.(bool)
+}
+
+// IsServiceIndependent returns whether the service is independent.
+func (c *RaftCluster) SetServiceIndependent(name string, independent bool) {
+	c.independentServices.Store(name, independent)
+}
+
+// IsServiceIndependent returns whether the service is independent.
+func (c *RaftCluster) DeleteServiceIndependent(name string) {
+	c.independentServices.Delete(name)
 }

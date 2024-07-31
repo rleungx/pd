@@ -17,7 +17,6 @@ package server
 import (
 	"bytes"
 	"context"
-	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -476,24 +475,22 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
-		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-		if !s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-				return err
-			}
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
 		}
-		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-				return err
-			}
+	}
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
 		}
 	}
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -1736,29 +1733,6 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
-		}()
-	}
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return

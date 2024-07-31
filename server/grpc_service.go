@@ -272,7 +272,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 
 	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
-	if s.IsAPIServiceMode() {
+	if s.IsAPIServiceMode() && s.GetRaftCluster().IsServiceIndependent(utils.TSOServiceName) {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
 		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
@@ -316,7 +316,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS *pdpb.Timestamp
 		err   error
 	)
-	if s.IsAPIServiceMode() {
+	if s.IsAPIServiceMode() && s.GetRaftCluster().IsServiceIndependent(utils.TSOServiceName) {
 		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
 	} else {
 		start := time.Now()
@@ -522,7 +522,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return err
 		}
 	}
-	if s.IsAPIServiceMode() {
+
+	if s.IsAPIServiceMode() && s.GetRaftCluster().IsServiceIndependent(utils.TSOServiceName) {
 		return s.forwardTSO(stream)
 	}
 
