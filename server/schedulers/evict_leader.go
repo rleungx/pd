@@ -98,6 +98,9 @@ func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+	failpoint.Inject("buildWithArgsErr", func() {
+		failpoint.Return(errors.New("fail to build with args"))
+	})
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
