@@ -49,6 +49,9 @@ import (
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
+
+	// Set the correct value when it runs inside docker.
+	_ "go.uber.org/automaxprocs"
 )
 
 const (
