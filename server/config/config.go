@@ -140,6 +140,14 @@ type Config struct {
 
 	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
 
+	// GRPCKeepAliveInterval is the frequency of server-to-client ping
+	// to check if a connection is alive. Close a non-responsive connection
+	// after an additional duration of Timeout. 0 to disable.
+	GRPCKeepAliveInterval time.Duration `json:"grpc-keepalive-interval"`
+	// GRPCKeepAliveTimeout is the additional duration of wait
+	// before closing a non-responsive connection. 0 to disable.
+	GRPCKeepAliveTimeout time.Duration `json:"grpc-keepalive-timeout"`
+
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
@@ -181,6 +189,9 @@ const (
 	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
 	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
 	defaultMaxRequestBytes = uint(150 * units.MiB) // 150MB
+
+	defaultGRPCKeepAliveInterval = 2 * time.Hour
+	defaultGRPCKeepAliveTimeout  = 3 * time.Second
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -421,6 +432,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 	if !configMetaData.IsDefined("max-request-bytes") {
 		c.MaxRequestBytes = defaultMaxRequestBytes
+	}
+	if !configMetaData.IsDefined("grpc-keepalive-interval") {
+		c.GRPCKeepAliveInterval = defaultGRPCKeepAliveInterval
+	}
+	if !configMetaData.IsDefined("grpc-keepalive-timeout") {
+		c.GRPCKeepAliveTimeout = defaultGRPCKeepAliveTimeout
 	}
 	configutil.AdjustDuration(&c.TickInterval, defaultTickInterval)
 	configutil.AdjustDuration(&c.ElectionInterval, defaultElectionInterval)
@@ -694,6 +711,8 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 	cfg.MaxRequestBytes = c.MaxRequestBytes
+	cfg.GRPCKeepAliveInterval = c.GRPCKeepAliveInterval
+	cfg.GRPCKeepAliveTimeout = c.GRPCKeepAliveTimeout
 
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
