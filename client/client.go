@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
@@ -634,6 +635,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	cb := circuitbreaker.FromContext(ctx)
+	log.Info("[pd] get region", zap.Binary("key", key), zap.Any("circuit breaker", cb))
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -648,6 +651,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	}
 	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx,
 		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	log.Info("[pd] get region1", zap.Binary("key", key), zap.Any("circuit breaker", cb))
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -658,6 +662,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 			return nil, errs.ErrClientGetProtoClient
 		}
 		resp, err = protoClient.GetRegion(cctx, req)
+		log.Info("[pd] get region2", zap.Binary("key", key), zap.Any("circuit breaker", cb))
 	}
 
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
