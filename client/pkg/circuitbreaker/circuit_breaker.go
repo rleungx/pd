@@ -132,6 +132,7 @@ func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
 // Execute returns an error instantly if the CircuitBreaker is open.
 // https://github.com/tikv/rfcs/blob/master/text/0115-circuit-breaker.md
 func (cb *CircuitBreaker) Execute(call func() (Overloading, error)) error {
+	log.Info("circuit breaker is executing a request", zap.String("name", cb.name))
 	state, err := cb.onRequest()
 	if err != nil {
 		cb.fastFailCounter.Inc()
