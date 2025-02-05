@@ -78,6 +78,7 @@ func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
 func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		cb := circuitbreaker.FromContext(ctx)
+		log.Info("circuit breaker", zap.Any("cb", cb))
 		if cb == nil {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
