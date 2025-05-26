@@ -105,7 +105,7 @@ func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []keyutil
 }
 
 func (*evictSlowTrendSchedulerConfig) getBatch() int {
-	return EvictLeaderBatchSize
+	return evictSlowStoreLeaderBatchSize
 }
 
 func (conf *evictSlowTrendSchedulerConfig) hasEvictedStores() bool {

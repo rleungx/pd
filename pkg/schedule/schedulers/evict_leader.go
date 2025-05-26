@@ -40,9 +40,9 @@ import (
 )
 
 const (
-	// EvictLeaderBatchSize is the number of operators to transfer
+	// evictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
-	EvictLeaderBatchSize = 3
+	evictLeaderBatchSize = 3
 	lastStoreDeleteInfo  = "The last store has been deleted"
 )
 

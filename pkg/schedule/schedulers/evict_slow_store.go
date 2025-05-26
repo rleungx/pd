@@ -37,8 +37,9 @@ import (
 )
 
 const (
-	slowStoreEvictThreshold   = 100
-	slowStoreRecoverThreshold = 1
+	slowStoreEvictThreshold       = 100
+	slowStoreRecoverThreshold     = 1
+	evictSlowStoreLeaderBatchSize = 10
 )
 
 type evictSlowStoreSchedulerConfig struct {
@@ -61,7 +62,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:     time.Time{},
 		RecoveryDurationGap:        defaultRecoveryDurationGap,
 		EvictedStores:              make([]uint64, 0),
-		Batch:                      EvictLeaderBatchSize,
+		Batch:                      evictSlowStoreLeaderBatchSize,
 	}
 }
 
@@ -220,7 +221,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 		return err
 	}
 	if newCfg.Batch == 0 {
-		newCfg.Batch = EvictLeaderBatchSize
+		newCfg.Batch = evictSlowStoreLeaderBatchSize
 	}
 	old := make(map[uint64]struct{})
 	for _, id := range s.conf.EvictedStores {
