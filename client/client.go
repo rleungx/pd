@@ -565,7 +565,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			}
 		}
 	})
-	metrics.TSORetryCount.Observe(float64(retryCount))
+	// metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
 
