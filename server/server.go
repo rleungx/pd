@@ -457,9 +457,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	// Initialize an etcd storage as the default storage.
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
-	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
+	regionStorage, err := storage.NewRegionStorageWithS3Backend(
 		ctx,
-		filepath.Join(s.cfg.DataDir, "region-meta"),
+		&kv.S3Config{
+			Region:   "us-east-1",
+			Endpoint: "http://127.0.0.1:9008",
+			Bucket:   "my-test-bucket",
+		},
 		s.encryptionKeyManager)
 	if err != nil {
 		return err

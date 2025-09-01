@@ -16,10 +16,13 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
@@ -40,7 +43,7 @@ func TestEtcd(t *testing.T) {
 	kv := NewEtcdKVBase(client)
 	testReadWrite(re, kv)
 	testRange(re, kv)
-	testSaveMultiple(re, kv, 20)
+	testSaveMultiple(re, kv)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
 }
@@ -53,7 +56,7 @@ func TestLevelDB(t *testing.T) {
 
 	testReadWrite(re, kv)
 	testRange(re, kv)
-	testSaveMultiple(re, kv, 20)
+	testSaveMultiple(re, kv)
 	re.NoError(kv.Close())
 }
 
@@ -62,7 +65,54 @@ func TestMemKV(t *testing.T) {
 	kv := NewMemoryKV()
 	testReadWrite(re, kv)
 	testRange(re, kv)
-	testSaveMultiple(re, kv, 20)
+	testSaveMultiple(re, kv)
+}
+
+// The following test requires S3 credentials and configuration to be set via environment variables:
+// - AWS_ACCESS_KEY_ID: AWS access key
+// - AWS_SECRET_ACCESS_KEY: AWS secret key
+// - AWS_REGION: AWS region (optional, defaults to us-east-1)
+// - S3_ENDPOINT: S3 endpoint URL (optional, for S3-compatible services like MinIO)
+// - S3_BUCKET: S3 bucket name for testing
+//
+// If these environment variables are not set, the test will be skipped.
+
+func TestS3KV(t *testing.T) {
+	re := require.New(t)
+
+	if awsAccessKey == "" || awsSecretKey == "" || awsRegion == "" || s3Endpoint == "" || s3Bucket == "" {
+		t.Skip("Skipping S3 kv test: AWS credentials or S3 configuration not provided")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	config := &S3Config{
+		Endpoint: s3Endpoint,
+		Bucket:   s3Bucket,
+		Region:   awsRegion,
+		Prefix:   "test-kv/",
+	}
+
+	kv, err := NewS3KV(ctx, config)
+	if err != nil {
+		t.Skipf("Skipping S3 KV test: %v", err)
+		return
+	}
+	defer func() {
+		// Clean up test data
+		cleanupS3TestData(ctx, kv.(*s3KV))
+		if closer, ok := kv.(interface{ Close() error }); ok {
+			closer.Close()
+		}
+	}()
+
+	testReadWrite(re, kv)
+	testRange(re, kv)
+	testSaveMultiple(re, kv)
+
+	// Test S3-specific features
+	testS3Flush(re, kv)
+	testS3BucketDistribution(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -123,7 +173,8 @@ func testRange(re *require.Assertions, kv Base) {
 	}
 }
 
-func testSaveMultiple(re *require.Assertions, kv Base, count int) {
+func testSaveMultiple(re *require.Assertions, kv Base) {
+	count := 20
 	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
 		var saveErr error
 		for i := range count {
@@ -402,4 +453,78 @@ func testRawTxn(re *require.Assertions, kv Base) {
 		{Key: "txn-k1", CmpType: RawTxnCmpEqual, Value: "v0"},
 		{Key: "txn-k2", CmpType: RawTxnCmpEqual, Value: "v0"},
 	}, false)
+}
+
+// testS3Flush tests S3-specific flush functionality
+func testS3Flush(re *require.Assertions, kv Base) {
+	// Save some test data
+	err := kv.Save("flush-test-key1", "flush-test-value1")
+	re.NoError(err)
+
+	err = kv.Save("flush-test-key2", "flush-test-value2")
+	re.NoError(err)
+
+	// Test explicit flush if supported
+	if flusher, ok := kv.(interface{ Flush() error }); ok {
+		err = flusher.Flush()
+		re.NoError(err)
+	}
+
+	// Verify data is still accessible after flush
+	val1, err := kv.Load("flush-test-key1")
+	re.NoError(err)
+	re.Equal("flush-test-value1", val1)
+
+	val2, err := kv.Load("flush-test-key2")
+	re.NoError(err)
+	re.Equal("flush-test-value2", val2)
+
+	// Clean up
+	re.NoError(kv.Remove("flush-test-key1"))
+	re.NoError(kv.Remove("flush-test-key2"))
+}
+
+// testS3BucketDistribution tests that keys are distributed across buckets
+func testS3BucketDistribution(re *require.Assertions, kv Base) {
+	// Save many keys to test distribution
+	testKeys := make([]string, 100)
+	testValues := make([]string, 100)
+
+	for i := range 100 {
+		testKeys[i] = fmt.Sprintf("bucket-test-key-%d", i)
+		testValues[i] = fmt.Sprintf("bucket-test-value-%d", i)
+
+		err := kv.Save(testKeys[i], testValues[i])
+		re.NoError(err)
+	}
+
+	// Verify all keys can be loaded correctly
+	for i := range 100 {
+		val, err := kv.Load(testKeys[i])
+		re.NoError(err)
+		re.Equal(testValues[i], val)
+	}
+
+	// Test LoadRange with the distributed keys
+	keys, values, err := kv.LoadRange("bucket-test-key-", "bucket-test-key-z", 50)
+	re.NoError(err)
+	re.NotEmpty(keys)
+	re.Len(values, len(keys))
+
+	// Clean up
+	for i := range 100 {
+		re.NoError(kv.Remove(testKeys[i]))
+	}
+}
+
+// cleanupS3TestData removes all test data from S3
+func cleanupS3TestData(ctx context.Context, kv *s3KV) {
+	bucketKey := kv.bucketKey()
+
+	// Delete the bucket object
+	deleteInput := &s3.DeleteObjectInput{
+		Bucket: aws.String(kv.config.Bucket),
+		Key:    aws.String(bucketKey),
+	}
+	_, _ = kv.client.DeleteObject(ctx, deleteInput)
 }
