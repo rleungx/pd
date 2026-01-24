@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server/apiv2/handlers"
 )
@@ -41,6 +43,7 @@ const (
 	nmRemove              = "remove"
 	nmUpdate              = "update"
 	nmForceRefreshGroupID = "force_refresh_group_id"
+	nmTableID             = "table-id"
 )
 
 // NewKeyspaceCommand returns a keyspace subcommand of rootCmd.
@@ -453,13 +456,15 @@ func newSetPlacementCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "set-placement <keyspace-id> <label-key>=<label-value> [<label-key>=<label-value>...]",
 		Short: "set keyspace placement rules with store label constraints",
-		Long: "Set placement rules for all regions of a keyspace to stores matching the specified labels.\n" +
+		Long: "Set placement rules for all regions of a keyspace (or a specific table) to stores matching the specified labels.\n" +
 			"This creates a placement rule bundle that places the keyspace's regions on stores matching all the label constraints.\n" +
 			"Examples:\n" +
 			"  pd-ctl keyspace set-placement 1 zone=east\n" +
-			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd",
+			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd\n" +
+			"  pd-ctl keyspace set-placement 1 --table-id 100 zone=east",
 		Run: setPlacementCommandFunc,
 	}
+	r.Flags().Uint64(nmTableID, 0, "table ID for table-level placement rules (optional)")
 	return r
 }
 
@@ -485,6 +490,13 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Parse table ID if provided
+	tableID, err := cmd.Flags().GetUint64(nmTableID)
+	if err != nil {
+		cmd.PrintErrf("Failed to parse table ID flag: %v\n", err)
+		return
+	}
+
 	// Parse all label key=value pairs
 	var labelConstraints []pd.LabelConstraint
 	for _, labelPair := range labelPairs {
@@ -506,11 +518,23 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		})
 	}
 
-	// Generate key ranges for the keyspace
-	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
+	// Generate key ranges
+	var keyRanges []any
+	var groupID string
+	var ruleIDPrefix string
+	if tableID > 0 {
+		// Table-level placement: generate key ranges for the specific table within the keyspace
+		keyRanges = makeTableKeyRanges(keyspaceID32, int64(tableID))
+		groupID = fmt.Sprintf("keyspace-%d-table-%d", keyspaceID, tableID)
+		ruleIDPrefix = fmt.Sprintf("keyspace-%d-table-%d", keyspaceID, tableID)
+	} else {
+		// Keyspace-level placement: generate key ranges for the entire keyspace
+		keyRanges = keyspace.MakeKeyRanges(keyspaceID32)
+		groupID = fmt.Sprintf("keyspace-%d", keyspaceID)
+		ruleIDPrefix = fmt.Sprintf("keyspace-%d", keyspaceID)
+	}
 
 	// Create placement rule bundle
-	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := &pd.GroupBundle{
 		ID:       groupID,
 		Index:    100,
@@ -518,7 +542,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		Rules: []*pd.Rule{
 			{
 				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule", keyspaceID),
+				ID:      fmt.Sprintf("%s-rule", ruleIDPrefix),
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
 				Count:            3,
@@ -528,7 +552,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 			},
 			{
 				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
+				ID:      fmt.Sprintf("%s-rule-txn", ruleIDPrefix),
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
 				Count:            3,
@@ -551,17 +575,67 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	for _, lc := range labelConstraints {
 		labelDescs = append(labelDescs, fmt.Sprintf("%s=%s", lc.Key, strings.Join(lc.Values, ",")))
 	}
-	cmd.Printf("Successfully set placement rules for keyspace %d with label constraints: %s\n", keyspaceID, strings.Join(labelDescs, ", "))
+	if tableID > 0 {
+		cmd.Printf("Successfully set placement rules for keyspace %d table %d with label constraints: %s\n",
+			keyspaceID, tableID, strings.Join(labelDescs, ", "))
+	} else {
+		cmd.Printf("Successfully set placement rules for keyspace %d with label constraints: %s\n",
+			keyspaceID, strings.Join(labelDescs, ", "))
+	}
+}
+
+// makeTableKeyRanges generates key ranges for a specific table within a keyspace.
+// In TiDB, table data keys within a keyspace are encoded as:
+// EncodeBytes(keyspace_prefix_bytes + table_prefix + table_id_bytes)
+// where keyspace_prefix is 'r' or 'x' followed by keyspace ID bytes.
+func makeTableKeyRanges(keyspaceID uint32, tableID int64) []any {
+	// Reconstruct the keyspace prefix bytes (before encoding)
+	keyspaceIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyspaceIDBytes, keyspaceID)
+	keyspaceRawPrefix := append([]byte{'r'}, keyspaceIDBytes[1:]...)
+	keyspaceTxnPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
+
+	// Generate table key bytes: t{tableID} and t{tableID+1}
+	tableStartKey := codec.GenerateTableKey(tableID)
+	tableEndKey := codec.GenerateTableKey(tableID + 1)
+
+	// Combine keyspace prefix with table key and encode together
+	// This matches TiDB's actual encoding: EncodeBytes(keyspace_prefix + table_key)
+	rawStartKeyBytes := append(keyspaceRawPrefix, tableStartKey...)
+	rawEndKeyBytes := append(keyspaceRawPrefix, tableEndKey...)
+	txnStartKeyBytes := append(keyspaceTxnPrefix, tableStartKey...)
+	txnEndKeyBytes := append(keyspaceTxnPrefix, tableEndKey...)
+
+	// Encode the combined key
+	rawStartKey := codec.EncodeBytes(rawStartKeyBytes)
+	rawEndKey := codec.EncodeBytes(rawEndKeyBytes)
+	txnStartKey := codec.EncodeBytes(txnStartKeyBytes)
+	txnEndKey := codec.EncodeBytes(txnEndKeyBytes)
+
+	return []any{
+		map[string]any{
+			"start_key": hex.EncodeToString(rawStartKey),
+			"end_key":   hex.EncodeToString(rawEndKey),
+		},
+		map[string]any{
+			"start_key": hex.EncodeToString(txnStartKey),
+			"end_key":   hex.EncodeToString(txnEndKey),
+		},
+	}
 }
 
 func newRevertPlacementCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "revert-placement <keyspace-id>",
 		Short: "revert keyspace placement rules",
-		Long: "Remove placement rules for a keyspace.\n" +
-			"This deletes the placement rule bundle that was created by set-placement command.",
+		Long: "Remove placement rules for a keyspace (or a specific table).\n" +
+			"This deletes the placement rule bundle that was created by set-placement command.\n" +
+			"Examples:\n" +
+			"  pd-ctl keyspace revert-placement 1\n" +
+			"  pd-ctl keyspace revert-placement 1 --table-id 100",
 		Run: revertPlacementCommandFunc,
 	}
+	r.Flags().Uint64(nmTableID, 0, "table ID for table-level placement rules (optional)")
 	return r
 }
 
@@ -586,12 +660,30 @@ func revertPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Parse table ID if provided
+	tableID, err := cmd.Flags().GetUint64(nmTableID)
+	if err != nil {
+		cmd.PrintErrf("Failed to parse table ID flag: %v\n", err)
+		return
+	}
+
+	// Determine group ID based on whether table ID is provided
+	var groupID string
+	if tableID > 0 {
+		groupID = fmt.Sprintf("keyspace-%d-table-%d", keyspaceID, tableID)
+	} else {
+		groupID = fmt.Sprintf("keyspace-%d", keyspaceID)
+	}
+
 	// Delete the placement rule bundle using PDCli
-	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	if err := PDCli.DeletePlacementRuleBundleByGroup(cmd.Context(), groupID); err != nil {
 		cmd.PrintErrf("Failed to revert placement rule: %v\n", err)
 		return
 	}
 
-	cmd.Printf("Successfully reverted placement rules for keyspace %d\n", keyspaceID)
+	if tableID > 0 {
+		cmd.Printf("Successfully reverted placement rules for keyspace %d table %d\n", keyspaceID, tableID)
+	} else {
+		cmd.Printf("Successfully reverted placement rules for keyspace %d\n", keyspaceID)
+	}
 }
