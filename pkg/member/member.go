@@ -282,13 +282,16 @@ func (m *EmbeddedEtcdMember) ResetLeader() {
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
 func (m *EmbeddedEtcdMember) CheckPriority(ctx context.Context) {
-	etcdLeader := m.GetEtcdLeader()
-	if etcdLeader == m.ID() || etcdLeader == 0 {
-		return
-	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
 		log.Error("failed to load leader priority", errs.ZapError(err))
+		return
+	}
+	// Record leader priority for current instance.
+	memberLeaderPriorityGauge.WithLabelValues().Set(float64(myPriority))
+
+	etcdLeader := m.GetEtcdLeader()
+	if etcdLeader == m.ID() || etcdLeader == 0 {
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
