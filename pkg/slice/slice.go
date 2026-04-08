@@ -56,5 +56,9 @@ func Remove[T comparable](slice []T, value T) []T {
 			j++
 		}
 	}
+	var zero T
+	for k := j; k < len(slice); k++ {
+		slice[k] = zero
+	}
 	return slice[:j]
 }
