@@ -105,6 +105,8 @@ func TestResourceManagerServer(t *testing.T) {
 		respBytes, err := io.ReadAll(resp.Body)
 		re.NoError(err)
 		re.Contains(string(respBytes), "pd_server_info")
+		re.Contains(string(respBytes), "grpc_server_handled_total")
+		re.Contains(string(respBytes), "GetResourceGroup")
 	}
 
 	// Test status handler
