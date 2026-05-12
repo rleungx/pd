@@ -50,7 +50,6 @@ const (
 	GlobalDCLocation            = "global"
 	checkStep                   = time.Minute
 	patrolStep                  = time.Second
-	defaultAllocatorLeaderLease = 3
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
 )
