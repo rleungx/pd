@@ -3170,7 +3170,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3265,7 +3264,6 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3293,7 +3291,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, 3)
 
-	// option have 9 items because the default scheduler do not remove.
+	// The option still contains default schedulers plus the persisted dynamic schedulers.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
 	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
@@ -3322,8 +3320,8 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.AddScheduler(brs))
 	re.Len(controller.GetSchedulerNames(), 5)
 
-	// the scheduler option should contain 9 items
-	// the `hot scheduler` are disabled
+	// The scheduler option should still contain the default schedulers plus the
+	// persisted dynamic schedulers, though the hot scheduler is disabled.
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
 	// the scheduler that is not enable by default will be completely deleted
@@ -3379,7 +3377,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
-	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

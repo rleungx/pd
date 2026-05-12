@@ -456,7 +456,6 @@ func (suite *serverTestSuite) TestRemoveScheduler() {
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
 		types.BalanceHotRegionScheduler.String(),
-		types.EvictSlowStoreScheduler.String(),
 	}
 	checkSchedulerExist := func(name string, shouldExist bool) {
 		testutil.Eventually(re, func() bool {
@@ -469,19 +468,18 @@ func (suite *serverTestSuite) TestRemoveScheduler() {
 		checkSchedulerExist(name, true)
 	}
 
-	// Disable evict-slow-store-scheduler by calling DELETE API.
-	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
-	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
-	api.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
-
-	// Wait and verify the scheduler is removed from the controller.
+	// evict-slow-store-scheduler is no longer created by default.
 	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
 
-	// Re-enable the scheduler by calling ADD API.
+	// Add the scheduler explicitly by calling ADD API.
 	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
 
-	// Verify the scheduler exists again in the controller.
+	// Verify the scheduler exists in the controller.
 	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+
+	// Remove it again through the API.
+	api.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
 }
 
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {

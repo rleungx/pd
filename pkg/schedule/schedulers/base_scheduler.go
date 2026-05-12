@@ -140,8 +140,10 @@ func (s *BaseScheduler) SetDisable(disable bool) error {
 
 // IsDefault returns if the scheduler is a default scheduler.
 func (s *BaseScheduler) IsDefault() bool {
-	if _, ok := s.conf.(defaultSchedulerConfig); ok {
-		return true
+	for _, tp := range types.DefaultSchedulers {
+		if s.tp == tp {
+			return true
+		}
 	}
 	return false
 }

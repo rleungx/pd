@@ -155,6 +155,5 @@ var (
 		BalanceLeaderScheduler,
 		BalanceRegionScheduler,
 		BalanceHotRegionScheduler,
-		EvictSlowStoreScheduler,
 	}
 )
