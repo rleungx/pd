@@ -41,11 +41,14 @@ import (
 )
 
 const (
-	globalDCLocation            = "global"
-	memberUpdateInterval        = time.Minute
-	serviceModeUpdateInterval   = 3 * time.Second
-	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
-	updateMemberBackOffBaseTime = 100 * time.Millisecond
+	globalDCLocation          = "global"
+	memberUpdateInterval      = time.Minute
+	serviceModeUpdateInterval = 3 * time.Second
+	// Use a shorter timeout to recover faster from network isolation.
+	// It just use the backoff to control the retry frequency, so it won't cause too much load to PD.
+	updateMemberTimeout         = time.Second
+	updateMemberBackOffBaseTime = 20 * time.Millisecond
+	updateMemberBackOffMaxTime  = 100 * time.Millisecond
 
 	httpScheme  = "http"
 	httpsScheme = "https"
@@ -550,7 +553,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberBackOffMaxTime, updateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
@@ -627,7 +630,7 @@ func (c *pdServiceDiscovery) checkLeaderHealth(ctx context.Context) {
 func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
 	c.followers.Range(func(_, value any) bool {
 		// To ensure that the leader's healthy check is not delayed, shorten the duration.
-		ctx, cancel := context.WithTimeout(ctx, MemberHealthCheckInterval/3)
+		ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 		defer cancel()
 		serviceClient := value.(*pdServiceClient)
 		serviceClient.checkNetworkAvailable(ctx)
@@ -684,7 +687,7 @@ func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []s
 	case tsoService:
 		leaderURL := c.getLeaderURL()
 		if len(leaderURL) > 0 {
-			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL)
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",
 					zap.String("leader-url", leaderURL), errs.ZapError(err))
@@ -841,7 +844,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	defer cancel()
 	clusterID := uint64(0)
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(ctx, url, c.option.timeout)
+		members, err := c.getMembers(ctx, url)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
 			continue
@@ -872,7 +875,7 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 		return errors.New("no leader found")
 	}
 
-	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we set it to pd mode.
@@ -902,7 +905,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 			}
 		})
 
-		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
+		members, err := c.getMembers(c.ctx, url)
 		// Check the cluster ID.
 		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
 			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
@@ -942,13 +945,14 @@ func (c *pdServiceDiscovery) updateMember() error {
 	return errs.ErrClientGetMember.FastGenByArgs()
 }
 
-func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
+func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string) (*pdpb.GetClusterInfoResponse, error) {
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
 		return nil, err
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
+	timeout := defaultPDTimeout
 	key := "GetClusterInfo-" + url + timeout.String()
 	r := c.flight.DoChan(key, func() (any, error) {
 		callCtx, cancel := context.WithTimeout(c.ctx, timeout)
@@ -977,14 +981,14 @@ func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, tim
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 }
-
-func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
 		return nil, err
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
+	timeout := defaultPDTimeout
 	key := "GetMembers-" + url + timeout.String()
 	r := c.flight.DoChan(key, func() (any, error) {
 		callCtx, cancel := context.WithTimeout(c.ctx, timeout)

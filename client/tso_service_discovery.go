@@ -424,7 +424,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, updateMemberTimeout)
+		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL)
 		if err != nil {
 			log.Error("[tso] failed to find the keyspace group",
 				zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -440,7 +440,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		// timestamp fallback (issue #6770), so we should return an error instead.
 
 		clusterInfo, err := c.apiSvcDiscovery.(*pdServiceDiscovery).getClusterInfo(
-			c.ctx, c.apiSvcDiscovery.GetServingURL(), updateMemberTimeout)
+			c.ctx, c.apiSvcDiscovery.GetServingURL())
 		if err != nil {
 			log.Error("[tso] failed to get cluster info to check service mode",
 				zap.Uint32("keyspace-id", keyspaceID),
@@ -552,7 +552,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
-	keyspaceID uint32, tsoSrvURL string, timeout time.Duration,
+	keyspaceID uint32, tsoSrvURL string,
 ) (*tsopb.KeyspaceGroup, error) {
 	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
 		keyspaceToCheck, ok := val.(int)
@@ -560,7 +560,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			panic("findGroupByKeyspaceID is called unexpectedly")
 		}
 	})
-	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+	ctx, cancel := context.WithTimeout(c.ctx, defaultPDTimeout)
 	defer cancel()
 
 	cc, err := c.GetOrCreateGRPCConn(tsoSrvURL)

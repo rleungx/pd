@@ -38,12 +38,9 @@ const (
 	// defaultInnerCallerID marks the default caller ID of the inner PD HTTP client.
 	// It's used to distinguish the requests sent by the inner client via some internal logic.
 	defaultInnerCallerID = "pd-http-client-inner"
-	httpScheme           = "http"
-	httpsScheme          = "https"
 	networkErrorStatus   = "network error"
 
-	defaultMembersInfoUpdateInterval = time.Minute
-	defaultTimeout                   = 30 * time.Second
+	defaultTimeout = 30 * time.Second
 )
 
 // respHandleFunc is the function to handle the HTTP response.

@@ -24,6 +24,9 @@ import (
 )
 
 const (
+	// defaultPDTimeout is the default timeout for PD client requests.
+	// it is used internal requests like GetClusterInfo and GetMembers.
+	// other requests will use the c.option.timeout, which is also default to defaultPDTimeout, but can be customized by users.
 	defaultPDTimeout                             = 3 * time.Second
 	maxInitClusterRetries                        = 100
 	defaultMaxTSOBatchWaitInterval time.Duration = 0
