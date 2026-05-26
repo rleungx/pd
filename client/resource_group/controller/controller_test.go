@@ -20,7 +20,10 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,6 +303,18 @@ func TestControllerReportConsumption(t *testing.T) {
 
 	controller.ReportConsumption("unknown-name", delta)
 	controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
+}
+
+func matchMetaStorageRevision(revision int64) any {
+	return mock.MatchedBy(func(opts []pd.OpOption) bool {
+		op := &pd.Op{}
+		for _, opt := range opts {
+			opt(op)
+		}
+		value := reflect.ValueOf(op).Elem()
+		return value.FieldByName("revision").Int() == revision &&
+			value.FieldByName("isOptsWithPrefix").Bool()
+	})
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
@@ -588,9 +603,11 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 	// Short retry interval so the test runs fast.
-	gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
-	gc.mainCfg.WaitRetryTimes = 3
-	gc.mainCfg.LTBMaxWaitDuration = 100 * time.Millisecond
+	cfg := *gc.currentConfig()
+	cfg.WaitRetryInterval = 50 * time.Millisecond
+	cfg.WaitRetryTimes = 3
+	cfg.LTBMaxWaitDuration = 100 * time.Millisecond
+	gc.updateConfig(&cfg)
 
 	// Set fillRate=0 and never reconfigure — no signal will arrive.
 	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
@@ -609,5 +626,334 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 	// waitDuration should be roughly retryTimes * retryInterval.
-	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
+	cfg = *gc.currentConfig()
+	re.GreaterOrEqual(waitDuration, cfg.WaitRetryInterval*time.Duration(cfg.WaitRetryTimes))
+}
+
+func TestControllerConfigReloadKeepsRequestUnitOverride(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	requestUnitConfig := &RequestUnitConfig{
+		ReadBaseCost:          1,
+		ReadPerBatchBaseCost:  2,
+		ReadCostPerByte:       3,
+		WriteBaseCost:         4,
+		WritePerBatchBaseCost: 5,
+		WriteCostPerByte:      6,
+		CPUMsCost:             7,
+	}
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil).Once()
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, requestUnitConfig, 0)
+	re.NoError(err)
+
+	serverConfig := DefaultConfig()
+	serverConfig.RequestUnit = RequestUnitConfig{
+		ReadBaseCost:          11,
+		ReadPerBatchBaseCost:  12,
+		ReadCostPerByte:       13,
+		WriteBaseCost:         14,
+		WritePerBatchBaseCost: 15,
+		WriteCostPerByte:      16,
+		CPUMsCost:             17,
+	}
+	serverConfig.DegradedModeWaitDuration = NewDuration(time.Second)
+	value, err := json.Marshal(serverConfig)
+	re.NoError(err)
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 2},
+		Kvs: []*meta_storagepb.KeyValue{
+			{Value: value},
+		},
+	}, nil).Once()
+
+	revision, err := controller.reloadControllerConfig(ctx)
+	re.NoError(err)
+	re.Equal(int64(2), revision)
+
+	config := controller.GetConfig()
+	re.Equal(RequestUnit(requestUnitConfig.ReadBaseCost), config.ReadBaseCost)
+	re.Equal(RequestUnit(requestUnitConfig.ReadPerBatchBaseCost), config.ReadPerBatchBaseCost)
+	re.Equal(RequestUnit(requestUnitConfig.ReadCostPerByte), config.ReadBytesCost)
+	re.Equal(RequestUnit(requestUnitConfig.WriteBaseCost), config.WriteBaseCost)
+	re.Equal(RequestUnit(requestUnitConfig.WritePerBatchBaseCost), config.WritePerBatchBaseCost)
+	re.Equal(RequestUnit(requestUnitConfig.WriteCostPerByte), config.WriteBytesCost)
+	re.Equal(RequestUnit(requestUnitConfig.CPUMsCost), config.CPUMsCost)
+	re.Equal(time.Second, config.DegradedModeWaitDuration)
+	mockProvider.AssertExpectations(t)
+}
+
+func TestSendTokenBucketRequestsCreatesResponseDeadlineTimerAfterConfigUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil).Once()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+	re.Nil(controller.run.responseDeadline)
+
+	config := DefaultConfig()
+	config.DegradedModeWaitDuration = NewDuration(time.Hour)
+	controller.applyControllerConfig(config)
+	re.Nil(controller.run.responseDeadline)
+
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).
+		Return([]*rmpb.TokenBucketResponse{}, nil).Once()
+	re.NotPanics(func() {
+		controller.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{{ResourceGroupName: defaultResourceGroupName}}, FromPeriodReport, notifyMsg{})
+	})
+	re.NotNil(controller.run.responseDeadline)
+	re.NotNil(controller.responseDeadlineCh)
+	defer stopAndDrainTimer(controller.run.responseDeadline)
+
+	select {
+	case <-controller.tokenResponseChan:
+	case <-time.After(time.Second):
+		re.Fail("timeout waiting for token response")
+	}
+	mockProvider.AssertExpectations(t)
+}
+
+func TestControllerConfigConcurrentApplyAndRead(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil).Once()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := range 1000 {
+			config := DefaultConfig()
+			config.RequestUnit.ReadBaseCost = float64(i + 1)
+			config.DegradedModeWaitDuration = NewDuration(time.Duration(i%2) * time.Second)
+			controller.applyControllerConfig(config)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			config := controller.currentRUConfig()
+			if config == nil {
+				panic("nil ru config")
+			}
+			_ = config.ReadBaseCost
+			_ = controller.GetConfig().DegradedModeWaitDuration
+		}
+	}()
+	close(start)
+	wg.Wait()
+	mockProvider.AssertExpectations(t)
+}
+
+func TestControllerConfigUpdateAppliesToExistingGroups(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil).Once()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "test-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 1000000,
+				},
+			},
+		},
+	}
+	gc, err := newGroupCostController(group, controller.currentRUConfig(), controller.lowTokenNotifyChan, controller.tokenBucketUpdateChan)
+	re.NoError(err)
+	controller.groupsController.Store(group.Name, gc)
+
+	config := DefaultConfig()
+	config.RequestUnit.ReadBaseCost = 10
+	config.RequestUnit.ReadPerBatchBaseCost = 20
+	config.RequestUnit.WriteBaseCost = 30
+	config.RequestUnit.WritePerBatchBaseCost = 40
+	config.RequestUnit.WriteCostPerByte = 50
+	config.WaitRetryInterval = NewDuration(100 * time.Millisecond)
+	config.LTBTokenRPCMaxDelay = NewDuration(time.Second)
+	controller.applyControllerConfig(config)
+
+	updated := gc.currentConfig()
+	re.Equal(RequestUnit(10), updated.ReadBaseCost)
+	re.Equal(RequestUnit(20), updated.ReadPerBatchBaseCost)
+	re.Equal(100*time.Millisecond, updated.WaitRetryInterval)
+	re.Equal(10, updated.WaitRetryTimes)
+
+	delta := &rmpb.Consumption{}
+	gc.getKVCalculator().BeforeKVRequest(delta, NewTestRequestInfo(false, 0, 1))
+	re.Equal(10+20*defaultAvgBatchProportion, delta.RRU)
+
+	delta = &rmpb.Consumption{}
+	gc.getKVCalculator().BeforeKVRequest(delta, NewTestRequestInfo(true, 2, 1))
+	re.Equal(float64(30+40*defaultAvgBatchProportion+50*2), delta.WRU)
+	mockProvider.AssertExpectations(t)
+}
+
+func TestControllerConfigConcurrentApplyAndExistingGroupRequest(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil).Once()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "test-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   1000000,
+					BurstLimit: -1,
+				},
+			},
+		},
+	}
+	gc, err := newGroupCostController(group, controller.currentRUConfig(), controller.lowTokenNotifyChan, controller.tokenBucketUpdateChan)
+	re.NoError(err)
+	controller.groupsController.Store(group.Name, gc)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := range 1000 {
+			config := DefaultConfig()
+			config.RequestUnit.ReadBaseCost = float64(i + 1)
+			controller.applyControllerConfig(config)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range 1000 {
+			_, _, _, _, err := gc.onRequestWaitImpl(ctx, NewTestRequestInfo(false, 0, 1))
+			if err != nil {
+				panic(err)
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+	mockProvider.AssertExpectations(t)
+}
+
+func TestControllerConfigWatchReloadsRevisionBeforeRetry(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	originWatchRetryInterval := watchRetryInterval
+	watchRetryInterval = 20 * time.Millisecond
+	defer func() {
+		watchRetryInterval = originWatchRetryInterval
+	}()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+	}, nil).Once()
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+	}, nil).Once()
+
+	firstWatchConfigChan := make(chan []*meta_storagepb.Event)
+	close(firstWatchConfigChan)
+	secondWatchConfigChan := make(chan []*meta_storagepb.Event)
+	secondWatchCreated := make(chan struct{})
+
+	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchMetaStorageRevision(1)).
+		Return(firstWatchConfigChan, nil).Once()
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 10},
+	}, nil).Once()
+	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchMetaStorageRevision(10)).
+		Run(func(mock.Arguments) {
+			close(secondWatchCreated)
+		}).
+		Return(secondWatchConfigChan, nil).Once()
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42, EnableSingleGroupByKeyspace())
+	re.NoError(err)
+	controller.Start(ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
+
+	select {
+	case <-secondWatchCreated:
+	case <-time.After(time.Second):
+		re.Fail("timeout waiting for config watch retry")
+	}
+	mockProvider.AssertExpectations(t)
+}
+
+func TestControllerConfigWatchRetriesAfterRevisionLoadError(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	originWatchRetryInterval := watchRetryInterval
+	watchRetryInterval = 20 * time.Millisecond
+	defer func() {
+		watchRetryInterval = originWatchRetryInterval
+	}()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+	}, nil).Once()
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return((*meta_storagepb.GetResponse)(nil), errors.New("load revision failed")).Once()
+
+	watchConfigChan := make(chan []*meta_storagepb.Event)
+	watchCreated := make(chan struct{})
+
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 2},
+	}, nil).Once()
+	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, matchMetaStorageRevision(2)).
+		Run(func(mock.Arguments) {
+			close(watchCreated)
+		}).
+		Return(watchConfigChan, nil).Once()
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42, EnableSingleGroupByKeyspace())
+	re.NoError(err)
+	controller.Start(ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
+
+	select {
+	case <-watchCreated:
+	case <-time.After(time.Second):
+		re.Fail("timeout waiting for config watch retry after revision load error")
+	}
+	mockProvider.AssertExpectations(t)
 }
