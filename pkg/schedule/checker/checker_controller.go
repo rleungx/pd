@@ -19,6 +19,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -82,6 +84,7 @@ type Controller struct {
 		syncutil.RWMutex
 		duration time.Duration
 	}
+	operatorMu syncutil.Mutex
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
@@ -112,6 +115,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
+		workerCount:             cluster.GetCheckerConfig().GetPatrolRegionWorkerCount(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
 }
@@ -133,17 +137,13 @@ func (c *Controller) PatrolRegions() {
 		select {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
-			c.updatePatrolWorkersIfNeeded()
-			if c.cluster.IsSchedulingHalted() {
-				for len(c.patrolRegionContext.regionChan) > 0 {
-					<-c.patrolRegionContext.regionChan
-				}
-				log.Debug("skip patrol regions due to scheduling is halted")
+			// wait for the previous batch to be fully processed.
+			if !c.patrolRegionContext.isIdle() {
 				continue
 			}
-
-			// wait for the regionChan to be drained
-			if len(c.patrolRegionContext.regionChan) > 0 {
+			c.updatePatrolWorkersIfNeeded()
+			if c.cluster.IsSchedulingHalted() {
+				log.Debug("skip patrol regions due to scheduling is halted")
 				continue
 			}
 
@@ -160,6 +160,11 @@ func (c *Controller) PatrolRegions() {
 			c.cluster.UpdateRegionsLabelLevelStats(regions)
 			// When the key is nil, it means that the scan is finished.
 			if len(key) == 0 {
+				if !c.patrolRegionContext.waitIdle(c.ctx) {
+					patrolCheckRegionsGauge.Set(0)
+					c.setPatrolRegionsDuration(0)
+					return
+				}
 				// update the scan limit.
 				c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
 				// update the metrics.
@@ -195,6 +200,9 @@ func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
 func (c *Controller) updatePatrolWorkersIfNeeded() {
 	newWorkersCount := c.cluster.GetCheckerConfig().GetPatrolRegionWorkerCount()
 	if c.workerCount != newWorkersCount {
+		if !c.patrolRegionContext.isIdle() {
+			return
+		}
 		oldWorkersCount := c.workerCount
 		c.workerCount = newWorkersCount
 		// Stop the old workers and start the new workers.
@@ -206,6 +214,16 @@ func (c *Controller) updatePatrolWorkersIfNeeded() {
 			zap.Int("old-workers-count", oldWorkersCount),
 			zap.Int("new-workers-count", newWorkersCount))
 	}
+}
+
+type operatorControllerLimit struct {
+	kind        operator.OpKind
+	checkerType types.CheckerSchedulerType
+}
+
+type checkRegionResult struct {
+	ops   []*operator.Operator
+	limit *operatorControllerLimit
 }
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.
@@ -230,7 +248,7 @@ func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.
 	}
 
 	for _, region := range regions {
-		c.patrolRegionContext.regionChan <- region
+		c.patrolRegionContext.submit(region)
 		key = region.GetEndKey()
 	}
 	return
@@ -256,14 +274,13 @@ func (c *Controller) checkPriorityRegions() {
 			removes = append(removes, id)
 			continue
 		}
-		ops := c.CheckRegion(region)
+		result := c.checkRegion(region)
+		ops := result.ops
 		// it should skip if region needs to merge
 		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
 			continue
 		}
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-		}
+		c.addWaitingOperators(result)
 	}
 	for _, v := range removes {
 		c.RemovePriorityRegions(v)
@@ -273,16 +290,20 @@ func (c *Controller) checkPriorityRegions() {
 // CheckRegion will check the region and add a new operator if needed.
 // The function is exposed for test purpose.
 func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
+	return c.checkRegion(region).ops
+}
+
+func (c *Controller) checkRegion(region *core.RegionInfo) checkRegionResult {
 	// If PD has restarted, it needs to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
 	if op := c.jointStateChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+		return checkRegionResult{ops: []*operator.Operator{op}}
 	}
 
 	if op := c.splitChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+		return checkRegionResult{ops: []*operator.Operator{op}}
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
@@ -301,7 +322,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			fit := c.priorityInspector.Inspect(region)
 			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-					return []*operator.Operator{op}
+					return checkRegionResult{
+						ops: []*operator.Operator{op},
+						limit: &operatorControllerLimit{
+							kind:        operator.OpReplica,
+							checkerType: c.ruleChecker.GetType(),
+						},
+					}
 				}
 				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
 				c.pendingProcessedRegions.Put(region.GetID(), nil)
@@ -309,11 +336,17 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
-			return []*operator.Operator{op}
+			return checkRegionResult{ops: []*operator.Operator{op}}
 		}
 		if op := c.replicaChecker.Check(region); op != nil {
 			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+				return checkRegionResult{
+					ops: []*operator.Operator{op},
+					limit: &operatorControllerLimit{
+						kind:        operator.OpReplica,
+						checkerType: c.replicaChecker.GetType(),
+					},
+				}
 			}
 			operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
 			c.pendingProcessedRegions.Put(region.GetID(), nil)
@@ -325,7 +358,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		l := cl.GetRegionLabeler()
 		if l.ScheduleDisabled(region) {
 			denyCheckersByLabelerCounter.Inc()
-			return nil
+			return checkRegionResult{}
 		}
 	}
 
@@ -335,10 +368,16 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
 		} else if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			return ops
+			return checkRegionResult{
+				ops: ops,
+				limit: &operatorControllerLimit{
+					kind:        operator.OpMerge,
+					checkerType: c.mergeChecker.GetType(),
+				},
+			}
 		}
 	}
-	return nil
+	return checkRegionResult{}
 }
 
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
@@ -351,16 +390,42 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		c.RemovePendingProcessedRegion(id)
 		return
 	}
-	ops := c.CheckRegion(region)
-	if len(ops) == 0 {
+	result := c.checkRegion(region)
+	if len(result.ops) == 0 {
 		return
 	}
 
-	if !c.opController.ExceedStoreLimit(ops...) {
-		c.opController.AddWaitingOperator(ops...)
+	if c.addWaitingOperators(result) {
 		c.RemovePendingProcessedRegion(id)
 	} else {
 		c.AddPendingProcessedRegions(true, id)
+	}
+}
+
+func (c *Controller) addWaitingOperators(result checkRegionResult) bool {
+	if len(result.ops) == 0 {
+		return false
+	}
+	c.operatorMu.Lock()
+	defer c.operatorMu.Unlock()
+	if result.limit != nil && c.opController.OperatorCount(result.limit.kind) >= c.getOperatorLimit(result.limit.kind) {
+		operator.IncOperatorLimitCounter(result.limit.checkerType, result.limit.kind)
+		return false
+	}
+	if c.opController.ExceedStoreLimit(result.ops...) {
+		return false
+	}
+	return c.opController.AddWaitingOperator(result.ops...) > 0
+}
+
+func (c *Controller) getOperatorLimit(kind operator.OpKind) uint64 {
+	switch kind {
+	case operator.OpReplica:
+		return c.conf.GetReplicaScheduleLimit()
+	case operator.OpMerge:
+		return c.conf.GetMergeScheduleLimit()
+	default:
+		return 0
 	}
 }
 
@@ -499,7 +564,7 @@ func (c *Controller) IsPatrolRegionChanEmpty() bool {
 	if c.patrolRegionContext == nil {
 		return true
 	}
-	return len(c.patrolRegionContext.regionChan) == 0
+	return c.patrolRegionContext.isIdle()
 }
 
 // PatrolRegionContext is used to store the context of patrol regions.
@@ -508,11 +573,13 @@ type PatrolRegionContext struct {
 	workersCancel context.CancelFunc
 	regionChan    chan *core.RegionInfo
 	wg            sync.WaitGroup
+	pendingCount  atomic.Int64
 }
 
 func (p *PatrolRegionContext) init(ctx context.Context) {
 	p.regionChan = make(chan *core.RegionInfo, patrolRegionChanLen)
 	p.workersCtx, p.workersCancel = context.WithCancel(ctx)
+	p.pendingCount.Store(0)
 }
 
 func (p *PatrolRegionContext) stop() {
@@ -536,7 +603,10 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
 						log.Debug("region channel is closed", zap.Int("worker-id", i))
 						return
 					}
-					c.tryAddOperators(region)
+					func() {
+						defer p.pendingCount.Add(-1)
+						c.tryAddOperators(region)
+					}()
 				case <-p.workersCtx.Done():
 					log.Debug("region worker is closed", zap.Int("worker-id", i))
 					return
@@ -544,6 +614,26 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
 			}
 		}(i)
 	}
+}
+
+func (p *PatrolRegionContext) submit(region *core.RegionInfo) {
+	p.pendingCount.Add(1)
+	p.regionChan <- region
+}
+
+func (p *PatrolRegionContext) isIdle() bool {
+	return p.pendingCount.Load() == 0
+}
+
+func (p *PatrolRegionContext) waitIdle(ctx context.Context) bool {
+	for !p.isIdle() {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Millisecond):
+		}
+	}
+	return true
 }
 
 // GetPatrolRegionScanLimit returns the limit of regions to scan.
