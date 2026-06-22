@@ -38,7 +38,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const maxPendingListLen = 100000
+const (
+	maxPendingListLen = 100000
+
+	ruleCheckerFollowUpCheckKey   = "rule-checker-follow-up"
+	ruleCheckerFollowUpTiFlashKey = "tiflash-learner"
+)
 
 var (
 	errNoStoreToAdd        = errors.New("no store to add peer")
@@ -127,16 +132,18 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if err != nil {
 		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	} else if op != nil {
+		c.markTiFlashLearnerFollowUp(op, fit.RuleFits)
 		c.pendingList.Remove(region.GetID())
 		return op
 	}
-	for _, rf := range fit.RuleFits {
+	for i, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
 			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			continue
 		}
 		if op != nil {
+			c.markTiFlashLearnerFollowUp(op, fit.RuleFits[i+1:])
 			c.pendingList.Remove(region.GetID())
 			return op
 		}
@@ -160,6 +167,47 @@ func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
 func (c *RuleChecker) isWitnessEnabled() bool {
 	return versioninfo.IsFeatureSupported(c.cluster.GetCheckerConfig().GetClusterVersion(), versioninfo.SwitchWitness) &&
 		c.cluster.GetCheckerConfig().IsWitnessAllowed()
+}
+
+// NeedFollowUpRuleCheck returns true when an operator should trigger another
+// rule check after it finishes.
+func (*RuleChecker) NeedFollowUpRuleCheck(op *operator.Operator) bool {
+	return op != nil && op.GetAdditionalInfo(ruleCheckerFollowUpCheckKey) == ruleCheckerFollowUpTiFlashKey
+}
+
+func (c *RuleChecker) markTiFlashLearnerFollowUp(op *operator.Operator, rfs []*placement.RuleFit) {
+	if hasUnmetTiFlashLearnerRule(rfs) {
+		op.SetAdditionalInfo(ruleCheckerFollowUpCheckKey, ruleCheckerFollowUpTiFlashKey)
+	}
+}
+
+func hasUnmetTiFlashLearnerRule(rfs []*placement.RuleFit) bool {
+	for _, rf := range rfs {
+		if rf.Rule.Count <= len(rf.Peers) {
+			continue
+		}
+		if isTiFlashLearnerRule(rf.Rule) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTiFlashLearnerRule(rule *placement.Rule) bool {
+	if rule.Role != placement.Learner {
+		return false
+	}
+	for _, c := range rule.LabelConstraints {
+		if c.Key != core.EngineKey || c.Op != placement.In {
+			continue
+		}
+		for _, v := range c.Values {
+			if v == core.EngineTiFlash {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {

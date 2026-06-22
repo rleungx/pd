@@ -162,7 +162,7 @@ func (c *Coordinator) drivePushOperator() {
 			log.Info("drive push operator has been stopped")
 			return
 		case <-ticker.C:
-			c.opController.PushOperators(c.RecordOpStepWithTTL)
+			c.opController.PushOperators(c.RecordOperatorFinish)
 		}
 	}
 }
@@ -635,7 +635,15 @@ func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticRe
 	return c.diagnosticManager.GetDiagnosticResult(name)
 }
 
-// RecordOpStepWithTTL records OpStep with TTL
-func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
-	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
+// RecordOperatorFinish records follow-up work after an operator finishes.
+func (c *Coordinator) RecordOperatorFinish(op *operator.Operator) {
+	if op == nil {
+		return
+	}
+	if op.ContainNonWitnessStep() {
+		c.GetRuleChecker().RecordRegionPromoteToNonWitness(op.RegionID())
+	}
+	if c.GetRuleChecker().NeedFollowUpRuleCheck(op) {
+		c.checkers.AddPendingProcessedRegions(false, op.RegionID())
+	}
 }

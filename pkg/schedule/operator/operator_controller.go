@@ -133,7 +133,7 @@ func (oc *Controller) GetHBStreams() *hbstream.HeartbeatStreams {
 }
 
 // Dispatch is used to dispatch the operator of a region.
-func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpStepWithTTL func(regionID uint64)) {
+func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOperatorFinish func(op *Operator)) {
 	// Check existed
 	if op := oc.GetOperator(region.GetID()); op != nil {
 		failpoint.Inject("concurrentRemoveOperator", func() {
@@ -151,10 +151,10 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case SUCCESS:
-			if op.ContainNonWitnessStep() {
-				recordOpStepWithTTL(op.RegionID())
-			}
 			if oc.RemoveOperator(op) {
+				if recordOperatorFinish != nil {
+					recordOperatorFinish(op)
+				}
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
 			}
@@ -276,7 +276,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 }
 
 // PushOperators periodically pushes the unfinished operator to the executor(TiKV).
-func (oc *Controller) PushOperators(recordOpStepWithTTL func(regionID uint64)) {
+func (oc *Controller) PushOperators(recordOperatorFinish func(op *Operator)) {
 	for {
 		r, next := oc.pollNeedDispatchRegion()
 		if !next {
@@ -286,7 +286,7 @@ func (oc *Controller) PushOperators(recordOpStepWithTTL func(regionID uint64)) {
 			continue
 		}
 
-		oc.Dispatch(r, DispatchFromNotifierQueue, recordOpStepWithTTL)
+		oc.Dispatch(r, DispatchFromNotifierQueue, recordOperatorFinish)
 	}
 }
 

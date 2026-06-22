@@ -1180,6 +1180,51 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersAndTiFlash() {
 	re.Equal("fast-replace-rule-down-peer", op.Desc())
 }
 
+func (suite *ruleCheckerTestSuite) TestTiFlashLearnerFollowUpRuleCheck() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", "engine": "tiflash"})
+	rule := &placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{{
+			Key:    "engine",
+			Op:     placement.In,
+			Values: []string{"tiflash"},
+		}},
+	}
+	re.NoError(suite.ruleManager.SetRule(rule))
+
+	// The default TiKV voter rule is checked before the TiFlash learner rule.
+	// The returned operator should repair the TiKV voter first, but record that
+	// the region needs a follow-up check for the missing TiFlash learner.
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.True(suite.rc.NeedFollowUpRuleCheck(op))
+	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
+
+	// If the TiFlash learner is already satisfied, the TiKV repair operator
+	// does not need a follow-up check.
+	suite.cluster.AddRegionWithLearner(2, 1, []uint64{2}, []uint64{4})
+	op = suite.rc.Check(suite.cluster.GetRegion(2))
+	re.NotNil(op)
+	re.False(suite.rc.NeedFollowUpRuleCheck(op))
+	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
+
+	// When the current operator is already adding the TiFlash learner, there is
+	// no later TiFlash learner rule to follow up.
+	suite.cluster.AddLeaderRegion(3, 1, 2, 3)
+	op = suite.rc.Check(suite.cluster.GetRegion(3))
+	re.NotNil(op)
+	re.False(suite.rc.NeedFollowUpRuleCheck(op))
+	re.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestIssue3293() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
