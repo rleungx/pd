@@ -120,6 +120,16 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 	re.GreaterOrEqual(uint32(timestamp.GetLogical()), s.defaultReq.GetCount())
 }
 
+func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
+	re := s.Require()
+	client := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
+
+	ctx := grpcutil.BuildForwardContext(context.Background(), s.follower.GetAddr())
+	_, err := client.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+}
+
 func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
 	re := s.Require()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

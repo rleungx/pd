@@ -538,12 +538,14 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-		tsoRequestProxyCtx context.Context
-		forwardStream      tsopb.TSO_TsoClient
-		cancelForward      context.CancelFunc
-		forwardCtx         context.Context
-		tsoStreamErr       error
-		lastForwardedHost  string
+		tsoRequestProxyCtx  context.Context
+		forwardedHost       = grpcutil.GetForwardedHost(stream.Context())
+		forwardedClientConn *grpc.ClientConn
+		forwardStream       tsopb.TSO_TsoClient
+		cancelForward       context.CancelFunc
+		forwardCtx          context.Context
+		tsoStreamErr        error
+		lastForwardedHost   string
 	)
 
 	defer func() {
@@ -602,14 +604,15 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return ErrNotStarted
 		}
 
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			clientConn, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
-			if err != nil {
-				return errors.WithStack(err)
+			if forwardedClientConn == nil {
+				forwardedClientConn, err = s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return errors.WithStack(err)
+				}
 			}
 
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
+			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, forwardedClientConn, request, stream)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
